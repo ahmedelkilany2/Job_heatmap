@@ -3,7 +3,7 @@ import pandas as pd
 import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
+from geopy.geocoders import Nominatim, Photon
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
 import time
 import datetime
@@ -21,34 +21,40 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4z
 AU_LAT_MIN, AU_LAT_MAX = -44, -10
 AU_LON_MIN, AU_LON_MAX = 112, 154
 
-# Initialize geocoder with a more specific user agent
-geolocator = Nominatim(user_agent="python-job-heatmap-au")
+# Initialize geocoders
+primary_geolocator = Nominatim(user_agent="python-job-heatmap-au")
+backup_geolocator = Photon(user_agent="python-job-heatmap-au")
 
-@st.cache_data(ttl=14_400)  # Cache for 4 hours
-def fetch_data() -> List[str]:
-    """Fetch job locations from Google Sheets."""
-    try:
-        df = pd.read_csv(SHEET_URL)
-        locations = df.iloc[:, 0].dropna().tolist()
-        
-        # Debug information
-        st.sidebar.write("📊 **Data Statistics**")
-        st.sidebar.write(f"Total locations found: {len(locations)}")
-        st.sidebar.write("First 5 locations:")
-        for loc in locations[:5]:
-            st.sidebar.write(f"- {loc}")
-            
-        return locations
-    except Exception as e:
-        logger.error(f"Error fetching data: {str(e)}")
-        st.error(f"Unable to fetch data from Google Sheets: {str(e)}")
-        return []
+# Rate limiting parameters
+MIN_DELAY = 1.5  # Minimum delay between requests in seconds
+REQUEST_WINDOW = 60  # Time window for rate limiting in seconds
+MAX_REQUESTS = 45  # Maximum requests per window
+
+# Rate limiting state
+if 'last_request_times' not in st.session_state:
+    st.session_state.last_request_times = []
+
+def enforce_rate_limit():
+    """Enforce rate limiting for geocoding requests"""
+    current_time = time.time()
+    # Remove old requests from the window
+    st.session_state.last_request_times = [t for t in st.session_state.last_request_times 
+                                         if current_time - t < REQUEST_WINDOW]
+    
+    # If we've hit the limit, wait
+    if len(st.session_state.last_request_times) >= MAX_REQUESTS:
+        sleep_time = st.session_state.last_request_times[0] + REQUEST_WINDOW - current_time
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+    
+    # Add current request to the window
+    st.session_state.last_request_times.append(current_time)
+    time.sleep(MIN_DELAY)  # Minimum delay between requests
 
 @st.cache_data(ttl=14_400)
-def geocode_location(location: str) -> Optional[Tuple[float, float]]:
+def geocode_location(location: str, attempt_number: int = 0) -> Optional[Tuple[float, float]]:
     """
-    Geocodes a location and ensures it falls within Australia.
-    Includes better error handling and rate limiting.
+    Geocodes a location using multiple services with fallback.
     """
     if not location:
         return None
@@ -59,39 +65,39 @@ def geocode_location(location: str) -> Optional[Tuple[float, float]]:
     else:
         formatted_loc = f"{location.strip()}, Australia"
 
-    max_retries = 3
-    base_delay = 1  # Base delay in seconds
-    
-    for attempt in range(max_retries):
-        try:
-            # Exponential backoff
-            time.sleep(base_delay * (2 ** attempt))
+    enforce_rate_limit()
+
+    try:
+        # Try primary geocoder first
+        geo = primary_geolocator.geocode(formatted_loc)
+        if geo:
+            lat, lon = geo.latitude, geo.longitude
+            if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
+                return lat, lon
             
-            geo = geolocator.geocode(formatted_loc)
+    except (GeocoderTimedOut, GeocoderUnavailable):
+        st.sidebar.warning(f"Primary geocoder failed, trying backup for: {location}")
+        try:
+            # Try backup geocoder
+            enforce_rate_limit()
+            geo = backup_geolocator.geocode(formatted_loc)
             if geo:
                 lat, lon = geo.latitude, geo.longitude
                 if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
                     return lat, lon
-                else:
-                    logger.warning(f"Location outside Australia bounds: {formatted_loc}")
-                    st.sidebar.warning(f"📍 Outside AU bounds: {formatted_loc}")
-            else:
-                logger.warning(f"Could not geocode location: {formatted_loc}")
-                st.sidebar.warning(f"📍 Geocoding failed: {formatted_loc}")
                 
-        except GeocoderTimedOut:
-            logger.warning(f"Geocoding timed out for {formatted_loc} (attempt {attempt + 1}/{max_retries})")
-            st.sidebar.warning(f"⏱️ Timeout: {formatted_loc}")
-        except GeocoderUnavailable:
-            logger.error(f"Geocoding service unavailable for {formatted_loc}")
-            st.sidebar.error("🚫 Geocoding service unavailable - trying alternative service")
-            # Try alternative geocoding service here if needed
-            time.sleep(5)
         except Exception as e:
-            logger.error(f"Unexpected error geocoding {formatted_loc}: {str(e)}")
-            st.sidebar.error(f"❌ Error: {str(e)}")
-            break
-
+            logger.error(f"Backup geocoder error: {str(e)}")
+            st.sidebar.error(f"Both geocoders failed for: {location}")
+            
+    except Exception as e:
+        logger.error(f"Geocoding error: {str(e)}")
+        
+    # If we're here, both geocoders failed or returned invalid coordinates
+    if attempt_number < 2:  # Try up to 3 times
+        time.sleep(2 ** attempt_number)  # Exponential backoff
+        return geocode_location(location, attempt_number + 1)
+        
     return None
 
 def get_location_data() -> List[Tuple[float, float]]:
