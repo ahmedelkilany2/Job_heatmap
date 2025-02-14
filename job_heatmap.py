@@ -7,6 +7,9 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 import time
 
+# Google Sheets CSV URL (unchanged)
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv&gid=0"
+
 # Australia's latitude & longitude range
 AU_LAT_MIN, AU_LAT_MAX = -44, -10
 AU_LON_MIN, AU_LON_MAX = 112, 154
@@ -15,11 +18,11 @@ AU_LON_MIN, AU_LON_MAX = 112, 154
 geolocator = Nominatim(user_agent="python-job-heatmap-au", timeout=10)
 
 @st.cache_data(ttl=14_400)  # Cache for 4 hours
-def fetch_data(file_path):
-    """Fetch job locations from uploaded CSV file."""
+def fetch_data():
+    """Fetch job locations from Google Sheets."""
     try:
-        df = pd.read_csv(file_path)
-        locations = df['location'].dropna().tolist()
+        df = pd.read_csv(SHEET_URL)
+        locations = df.iloc[:, 0].dropna().tolist()
         return locations
     except Exception as e:
         st.error(f"Error fetching data: {e}")
@@ -48,9 +51,9 @@ def geocode_location(location):
     return None
 
 @st.cache_data(ttl=14_400)
-def get_location_data(file_path):
+def get_location_data():
     """Converts job locations to latitude & longitude with caching."""
-    locations = fetch_data(file_path)
+    locations = fetch_data()
     if not locations:
         return []
 
@@ -68,27 +71,26 @@ def get_location_data(file_path):
 
 def main():
     st.title("🔍 Job Heatmap Analytics (Australia)")
-    st.write("Upload a CSV file containing job locations to generate a heatmap.")
+    st.write("Real-time job location heatmap from Google Sheets.")
 
-    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+    try:
+        with st.spinner("Loading location data..."):
+            location_data = get_location_data()
 
-    if uploaded_file is not None:
-        try:
-            with st.spinner("Loading location data..."):
-                location_data = get_location_data(uploaded_file)
+        if location_data:
+            map_center = [-25.2744, 133.7751]  # Center of Australia
+            job_map = folium.Map(location=map_center, zoom_start=5)
+            HeatMap(location_data, radius=15, blur=10).add_to(job_map)
 
-            if location_data:
-                map_center = [-25.2744, 133.7751]  # Center of Australia
-                job_map = folium.Map(location=map_center, zoom_start=5)
-                HeatMap(location_data, radius=15, blur=10).add_to(job_map)
+            st_folium(job_map, width=800, height=500)
 
-                st_folium(job_map, width=800, height=500)
-                st.write(f"✅ **Showing {len(location_data)} valid locations**")
-                st.write("🔄 **Auto-refreshing every 4 hours** ⏳")
-            else:
-                st.warning("⚠ No valid job locations found. Please check the data source.")
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+            st.write(f"✅ **Showing {len(location_data)} valid locations**")
+            st.write("🔄 **Auto-refreshing every 4 hours** ⏳")
+        else:
+            st.warning("⚠ No valid job locations found. Please check the data source.")
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
     main()
