@@ -51,6 +51,26 @@ def enforce_rate_limit():
     st.session_state.last_request_times.append(current_time)
     time.sleep(MIN_DELAY)  # Minimum delay between requests
 
+@st.cache_data(ttl=14_400)  # Cache for 4 hours
+def fetch_data() -> List[str]:
+    """Fetch job locations from Google Sheets."""
+    try:
+        df = pd.read_csv(SHEET_URL)
+        locations = df.iloc[:, 0].dropna().tolist()
+        
+        # Debug information
+        st.sidebar.write("📊 **Data Statistics**")
+        st.sidebar.write(f"Total locations found: {len(locations)}")
+        st.sidebar.write("First 5 locations:")
+        for loc in locations[:5]:
+            st.sidebar.write(f"- {loc}")
+            
+        return locations
+    except Exception as e:
+        logger.error(f"Error fetching data: {str(e)}")
+        st.error(f"Unable to fetch data from Google Sheets: {str(e)}")
+        return []
+
 @st.cache_data(ttl=14_400)
 def geocode_location(location: str, attempt_number: int = 0) -> Optional[Tuple[float, float]]:
     """
