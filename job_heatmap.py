@@ -6,9 +6,10 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 import time
+from streamlit_extras.app_refresh import st_autorefresh  # Import for auto-refresh
 
 # Auto-refresh every 4 hours (14,400,000 ms)
-st_autorefresh = st.runtime.legacy_caching.hashing.hash_func(lambda: None, key="refresh", interval=14_400_000)
+st_autorefresh(interval=14_400_000, key="data_refresh")
 
 # Google Sheets CSV URL (Ensure it always pulls from the first sheet)
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/export?format=csv"
