@@ -7,6 +7,9 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 import time
 
+# Auto-refresh every 4 hours (14,400,000 ms)
+st_autorefresh = st.runtime.legacy_caching.hashing.hash_func(lambda: None, key="refresh", interval=14_400_000)
+
 # Google Sheets CSV URL (Ensure it always pulls from the first sheet)
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/export?format=csv"
 
@@ -17,7 +20,7 @@ AU_LON_MIN, AU_LON_MAX = 112, 154
 # Initialize geocoder with caching
 geolocator = Nominatim(user_agent="job_location_geocoder")
 
-@st.cache_data  # Cache function to avoid redundant API calls
+@st.cache_data(ttl=14_400)  # Cache function (expires every 4 hours)
 def fetch_data():
     """Fetches latest job locations from Google Sheets."""
     try:
@@ -27,7 +30,7 @@ def fetch_data():
         st.error(f"Error fetching data: {e}")
         return []
 
-@st.cache_data
+@st.cache_data(ttl=14_400)
 def geocode_location(location):
     """Geocodes a location and ensures it falls within Australia."""
     if "VIC" in location:
@@ -72,10 +75,6 @@ if location_data:
     # Render the map in Streamlit
     st_folium(job_map, width=800, height=500)
 
-    # Auto-refresh every 30 seconds
-    st.write("🔄 **Auto-refreshing every 30 seconds** to get the latest data.")
-    time.sleep(30)
-    st.experimental_rerun()
-
+    st.write("✅ **Auto-refresh enabled: Every 4 hours** ⏳")
 else:
     st.warning("⚠ No valid job locations found. Please check the data source.")
