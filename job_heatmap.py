@@ -104,43 +104,63 @@ def fetch_and_process_data():
             if location in geocode_cache:
                 return geocode_cache[location]
             
-            # Append "Victoria, Australia" if "VIC" is in location
-            formatted_loc = location.replace("VIC", "").strip() + ", Victoria, Australia" if "VIC" in location else location + ", Australia"
+            # Just return None for now - we'll geocode unique locations separately
+            return None
+        
+        # First pass: use cache and identify unique locations that need geocoding
+        location_data = []
+        unique_locations_to_geocode = set()
+        location_to_coords = {}
+        
+        for loc in locations:
+            coords = get_lat_lon(loc)
+            if coords:
+                location_data.append(coords)
+                location_to_coords[loc] = coords
+            else:
+                unique_locations_to_geocode.add(loc)
+        
+        # Progress bar for geocoding
+        if unique_locations_to_geocode:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
-            for attempt in range(3):  # Retry up to 3 times
+            # Geocode only unique locations that aren't in cache
+            total_to_geocode = len(unique_locations_to_geocode)
+            for i, loc in enumerate(unique_locations_to_geocode):
+                # Update progress
+                progress = int((i / total_to_geocode) * 100)
+                progress_bar.progress(progress)
+                status_text.text(f"Geocoding location {i+1} of {total_to_geocode}: {loc}")
+                
+                # Append "Victoria, Australia" if "VIC" is in location
+                formatted_loc = loc.replace("VIC", "").strip() + ", Victoria, Australia" if "VIC" in loc else loc + ", Australia"
+                
                 try:
-                    time.sleep(1)  # Delay to prevent rate limiting
+                    time.sleep(1)  # Respect rate limits
                     geo = geolocator.geocode(formatted_loc)
                     if geo:
                         lat, lon = geo.latitude, geo.longitude
                         # Check if location is within Australia
                         if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
                             coords = (lat, lon)
-                            geocode_cache[location] = coords
-                            return coords
-                        else:
-                            return None
-                except GeocoderTimedOut:
-                    continue
+                            geocode_cache[loc] = coords
+                            location_to_coords[loc] = coords
                 except Exception as e:
-                    print(f"Error geocoding {location}: {e}")
-                    break
+                    print(f"Error geocoding {loc}: {e}")
             
-            return None
+            # Clean up progress elements
+            progress_bar.empty()
+            status_text.empty()
+            
+            # Save updated cache after all geocoding is done
+            save_cache(geocode_cache)
         
-        # Convert locations to lat/lon, filtering out invalid ones
+        # Second pass: build final location_data using the cached and newly geocoded coordinates
         location_data = []
-        failed_locations = []
-        
         for loc in locations:
-            coords = get_lat_lon(loc)
-            if coords:
-                location_data.append(coords)
-            else:
-                failed_locations.append(loc)
-        
-        # Save updated cache
-        save_cache(geocode_cache)
+            if loc in location_to_coords:
+                location_data.append(location_to_coords[loc])
         
         # Update session state
         st.session_state.location_data = location_data
@@ -157,6 +177,7 @@ def fetch_and_process_data():
         
     except Exception as e:
         print(f"Error in data refresh: {e}")
+        st.error(f"Error refreshing data: {e}")
 
 def background_job():
     while True:
@@ -188,7 +209,7 @@ def load_last_update():
 
 # Initial data fetch if needed
 if len(st.session_state.location_data) == 0 or check_needs_refresh():
-    with st.spinner("Fetching initial data..."):
+    with st.spinner("Updating data..."):
         # First try to load the last update time
         load_last_update()
         # Then fetch fresh data if needed
@@ -210,6 +231,8 @@ job_map = folium.Map(location=map_center, zoom_start=5)
 # Add HeatMap if we have data
 if st.session_state.location_data:
     HeatMap(st.session_state.location_data, radius=15, blur=10).add_to(job_map)
+else:
+    st.warning("No location data available to display on the map.")
 
 # Display the map
 st_folium(job_map, width=1200, height=600)
