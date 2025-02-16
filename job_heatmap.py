@@ -9,6 +9,8 @@ from streamlit_folium import st_folium
 import datetime
 import os
 import json
+import threading
+import schedule
 
 # Set page config
 st.set_page_config(
@@ -21,12 +23,23 @@ st.set_page_config(
 st.title("Job Location Heatmap - Australia")
 st.markdown("This map shows the distribution of job postings across Australia.")
 
-# Show last update time
+# Initialize session state variables
 if 'last_update' not in st.session_state:
     st.session_state.last_update = datetime.datetime.now()
+if 'location_data' not in st.session_state:
+    st.session_state.location_data = []
+if 'total_jobs' not in st.session_state:
+    st.session_state.total_jobs = 0
+if 'unique_locations' not in st.session_state:
+    st.session_state.unique_locations = 0
+if 'success_count' not in st.session_state:
+    st.session_state.success_count = 0
+if 'background_refresh_started' not in st.session_state:
+    st.session_state.background_refresh_started = False
 
+# Show last update time
 st.sidebar.info(f"Last updated: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
-st.sidebar.info("Data updates every 4 hours")
+st.sidebar.info("Data automatically updates every 4 hours")
 
 # Cache file for geocoding results
 CACHE_FILE = "geocode_cache.json"
@@ -47,7 +60,6 @@ def save_cache(cache):
 AU_LAT_MIN, AU_LAT_MAX = -44, -10
 AU_LON_MIN, AU_LON_MAX = 112, 154
 
-@st.cache_data(ttl=14400)  # Cache for 4 hours (14400 seconds)
 def fetch_and_process_data():
     # Google Sheets CSV URL
     sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv&gid=0"
@@ -99,45 +111,68 @@ def fetch_and_process_data():
     location_data = []
     failed_locations = []
     
-    # Use a progress bar for geocoding
-    with st.spinner("Geocoding locations..."):
-        for loc in locations:
-            coords = get_lat_lon(loc)
-            if coords:
-                location_data.append(coords)
-            else:
-                failed_locations.append(loc)
+    for loc in locations:
+        coords = get_lat_lon(loc)
+        if coords:
+            location_data.append(coords)
+        else:
+            failed_locations.append(loc)
     
     # Save updated cache
     save_cache(geocode_cache)
     
     # Update session state
+    st.session_state.location_data = location_data
+    st.session_state.total_jobs = total_jobs
+    st.session_state.unique_locations = unique_locations
+    st.session_state.success_count = len(location_data)
     st.session_state.last_update = datetime.datetime.now()
     
-    return {
-        'location_data': location_data,
-        'total_jobs': total_jobs,
-        'unique_locations': unique_locations,
-        'failed_count': len(failed_locations),
-        'success_count': len(location_data)
-    }
+    # Write to a status file that the app was updated
+    with open("last_update.txt", "w") as f:
+        f.write(st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S'))
+    
+    print(f"Data updated at {st.session_state.last_update}")
 
-# Get the data
-data = fetch_and_process_data()
-location_data = data['location_data']
+def background_job():
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+# Set up the background refresh job
+def setup_background_refresh():
+    if not st.session_state.background_refresh_started:
+        # Schedule the job to run every 4 hours
+        schedule.every(4).hours.do(fetch_and_process_data)
+        
+        # Start the background thread
+        thread = threading.Thread(target=background_job, daemon=True)
+        thread.start()
+        
+        st.session_state.background_refresh_started = True
+        print("Background refresh started")
+
+# Initial data fetch if needed
+if len(st.session_state.location_data) == 0:
+    with st.spinner("Fetching initial data..."):
+        fetch_and_process_data()
+
+# Set up the background refresh
+setup_background_refresh()
 
 # Display statistics
 col1, col2, col3 = st.columns(3)
-col1.metric("Total Job Postings", data['total_jobs'])
-col2.metric("Unique Locations", data['unique_locations'])
-col3.metric("Geocoded Locations", data['success_count'])
+col1.metric("Total Job Postings", st.session_state.total_jobs)
+col2.metric("Unique Locations", st.session_state.unique_locations)
+col3.metric("Geocoded Locations", st.session_state.success_count)
 
 # Create a map centered on Australia
 map_center = [-25.2744, 133.7751]
 job_map = folium.Map(location=map_center, zoom_start=5)
 
-# Add HeatMap
-HeatMap(location_data, radius=15, blur=10).add_to(job_map)
+# Add HeatMap if we have data
+if st.session_state.location_data:
+    HeatMap(st.session_state.location_data, radius=15, blur=10).add_to(job_map)
 
 # Display the map
 st_folium(job_map, width=1200, height=600)
@@ -148,5 +183,6 @@ st.markdown("© 2025 - Job Location Heatmap")
 
 # Add button to force refresh
 if st.button("Force Refresh Data"):
-    st.cache_data.clear()
+    with st.spinner("Refreshing data..."):
+        fetch_and_process_data()
     st.experimental_rerun()
