@@ -1,5 +1,6 @@
 pandas
 folium
+geopy
 streamlit
 streamlit-folium
-geopy
+schedule
