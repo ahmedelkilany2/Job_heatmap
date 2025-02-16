@@ -9,6 +9,8 @@ from streamlit_folium import st_folium
 import datetime
 import os
 import json
+import threading
+import schedule
 
 # Set page config
 st.set_page_config(
@@ -21,15 +23,48 @@ st.set_page_config(
 st.title("Job Location Heatmap - Australia")
 st.markdown("This map shows the distribution of job postings across Australia.")
 
-# Show last update time
+# Initialize session state variables
 if 'last_update' not in st.session_state:
     st.session_state.last_update = datetime.datetime.now()
+if 'location_data' not in st.session_state:
+    st.session_state.location_data = []
+if 'total_jobs' not in st.session_state:
+    st.session_state.total_jobs = 0
+if 'unique_locations' not in st.session_state:
+    st.session_state.unique_locations = 0
+if 'success_count' not in st.session_state:
+    st.session_state.success_count = 0
+if 'background_refresh_started' not in st.session_state:
+    st.session_state.background_refresh_started = False
+if 'needs_rerun' not in st.session_state:
+    st.session_state.needs_rerun = False
 
+# Show last update time
 st.sidebar.info(f"Last updated: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
-st.sidebar.info("Data updates every 4 hours")
+st.sidebar.info("Data automatically updates every 4 hours")
 
 # Cache file for geocoding results
 CACHE_FILE = "geocode_cache.json"
+LAST_UPDATE_FILE = "last_update.txt"
+
+# Check if we need to refresh based on the last update file
+def check_needs_refresh():
+    if os.path.exists(LAST_UPDATE_FILE):
+        try:
+            with open(LAST_UPDATE_FILE, "r") as f:
+                last_update_str = f.read().strip()
+                last_update = datetime.datetime.strptime(last_update_str, '%Y-%m-%d %H:%M:%S')
+                time_since_update = datetime.datetime.now() - last_update
+                # If it's been more than 4 hours since last update
+                if time_since_update > datetime.timedelta(hours=4):
+                    return True
+        except Exception as e:
+            print(f"Error reading last update file: {e}")
+            return True
+    else:
+        # No update file exists, so we should refresh
+        return True
+    return False
 
 # Load geocoding cache if it exists
 def load_cache():
@@ -47,97 +82,164 @@ def save_cache(cache):
 AU_LAT_MIN, AU_LAT_MAX = -44, -10
 AU_LON_MIN, AU_LON_MAX = 112, 154
 
-@st.cache_data(ttl=14400)  # Cache for 4 hours (14400 seconds)
 def fetch_and_process_data():
     # Google Sheets CSV URL
     sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv&gid=0"
     
-    # Load dataset from Google Sheets
-    df = pd.read_csv(sheet_url)
-    
-    # Keep all job locations (don't remove duplicates)
-    locations = df["location"].dropna().tolist()
-    
-    # Log statistics
-    total_jobs = len(df['location'].dropna())
-    unique_locations = len(set(locations))
-    
-    # Initialize geocoder and load cache
-    geolocator = Nominatim(user_agent="job_location_geocoder")
-    geocode_cache = load_cache()
-    
-    # Function to get latitude & longitude within Australia's bounds
-    def get_lat_lon(location):
-        if location in geocode_cache:
-            return geocode_cache[location]
+    try:
+        # Load dataset from Google Sheets
+        df = pd.read_csv(sheet_url)
         
-        # Append "Victoria, Australia" if "VIC" is in location
-        formatted_loc = location.replace("VIC", "").strip() + ", Victoria, Australia" if "VIC" in location else location + ", Australia"
+        # Keep all job locations (don't remove duplicates)
+        locations = df["location"].dropna().tolist()
         
-        for attempt in range(3):  # Retry up to 3 times
-            try:
-                time.sleep(1)  # Delay to prevent rate limiting
-                geo = geolocator.geocode(formatted_loc)
-                if geo:
-                    lat, lon = geo.latitude, geo.longitude
-                    # Check if location is within Australia
-                    if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
-                        coords = (lat, lon)
-                        geocode_cache[location] = coords
-                        return coords
-                    else:
-                        return None
-            except GeocoderTimedOut:
-                continue
-            except Exception as e:
-                print(f"Error geocoding {location}: {e}")
-                break
+        # Log statistics
+        total_jobs = len(df['location'].dropna())
+        unique_locations = len(set(locations))
         
-        return None
-    
-    # Convert locations to lat/lon, filtering out invalid ones
-    location_data = []
-    failed_locations = []
-    
-    # Use a progress bar for geocoding
-    with st.spinner("Geocoding locations..."):
+        # Initialize geocoder and load cache
+        geolocator = Nominatim(user_agent="job_location_geocoder")
+        geocode_cache = load_cache()
+        
+        # Function to get latitude & longitude within Australia's bounds
+        def get_lat_lon(location):
+            if location in geocode_cache:
+                return geocode_cache[location]
+            
+            # Just return None for now - we'll geocode unique locations separately
+            return None
+        
+        # First pass: use cache and identify unique locations that need geocoding
+        location_data = []
+        unique_locations_to_geocode = set()
+        location_to_coords = {}
+        
         for loc in locations:
             coords = get_lat_lon(loc)
             if coords:
                 location_data.append(coords)
+                location_to_coords[loc] = coords
             else:
-                failed_locations.append(loc)
-    
-    # Save updated cache
-    save_cache(geocode_cache)
-    
-    # Update session state
-    st.session_state.last_update = datetime.datetime.now()
-    
-    return {
-        'location_data': location_data,
-        'total_jobs': total_jobs,
-        'unique_locations': unique_locations,
-        'failed_count': len(failed_locations),
-        'success_count': len(location_data)
-    }
+                unique_locations_to_geocode.add(loc)
+        
+        # Progress bar for geocoding
+        if unique_locations_to_geocode:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Geocode only unique locations that aren't in cache
+            total_to_geocode = len(unique_locations_to_geocode)
+            for i, loc in enumerate(unique_locations_to_geocode):
+                # Update progress
+                progress = int((i / total_to_geocode) * 100)
+                progress_bar.progress(progress)
+                status_text.text(f"Geocoding location {i+1} of {total_to_geocode}: {loc}")
+                
+                # Append "Victoria, Australia" if "VIC" is in location
+                formatted_loc = loc.replace("VIC", "").strip() + ", Victoria, Australia" if "VIC" in loc else loc + ", Australia"
+                
+                try:
+                    time.sleep(1)  # Respect rate limits
+                    geo = geolocator.geocode(formatted_loc)
+                    if geo:
+                        lat, lon = geo.latitude, geo.longitude
+                        # Check if location is within Australia
+                        if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
+                            coords = (lat, lon)
+                            geocode_cache[loc] = coords
+                            location_to_coords[loc] = coords
+                except Exception as e:
+                    print(f"Error geocoding {loc}: {e}")
+            
+            # Clean up progress elements
+            progress_bar.empty()
+            status_text.empty()
+            
+            # Save updated cache after all geocoding is done
+            save_cache(geocode_cache)
+        
+        # Second pass: build final location_data using the cached and newly geocoded coordinates
+        location_data = []
+        for loc in locations:
+            if loc in location_to_coords:
+                location_data.append(location_to_coords[loc])
+        
+        # Update session state
+        st.session_state.location_data = location_data
+        st.session_state.total_jobs = total_jobs
+        st.session_state.unique_locations = unique_locations
+        st.session_state.success_count = len(location_data)
+        st.session_state.last_update = datetime.datetime.now()
+        
+        # Write to a status file that the app was updated
+        with open(LAST_UPDATE_FILE, "w") as f:
+            f.write(st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S'))
+        
+        print(f"Data updated at {st.session_state.last_update}")
+        
+    except Exception as e:
+        print(f"Error in data refresh: {e}")
+        st.error(f"Error refreshing data: {e}")
 
-# Get the data
-data = fetch_and_process_data()
-location_data = data['location_data']
+def background_job():
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # Check every minute
+
+# Set up the background refresh job
+def setup_background_refresh():
+    if not st.session_state.background_refresh_started:
+        # Schedule the job to run every 4 hours
+        schedule.every(4).hours.do(fetch_and_process_data)
+        
+        # Start the background thread
+        thread = threading.Thread(target=background_job, daemon=True)
+        thread.start()
+        
+        st.session_state.background_refresh_started = True
+        print("Background refresh started")
+
+# Load data from last update file if it exists
+def load_last_update():
+    if os.path.exists(LAST_UPDATE_FILE):
+        try:
+            with open(LAST_UPDATE_FILE, "r") as f:
+                last_update_str = f.read().strip()
+                st.session_state.last_update = datetime.datetime.strptime(last_update_str, '%Y-%m-%d %H:%M:%S')
+        except Exception as e:
+            print(f"Error loading last update: {e}")
+
+# If we need a rerun from previous interaction
+if st.session_state.needs_rerun:
+    st.session_state.needs_rerun = False
+    st.rerun()
+
+# Initial data fetch if needed
+if len(st.session_state.location_data) == 0 or check_needs_refresh():
+    with st.spinner("Updating data..."):
+        # First try to load the last update time
+        load_last_update()
+        # Then fetch fresh data if needed
+        fetch_and_process_data()
+
+# Set up the background refresh
+setup_background_refresh()
 
 # Display statistics
 col1, col2, col3 = st.columns(3)
-col1.metric("Total Job Postings", data['total_jobs'])
-col2.metric("Unique Locations", data['unique_locations'])
-col3.metric("Geocoded Locations", data['success_count'])
+col1.metric("Total Job Postings", st.session_state.total_jobs)
+col2.metric("Unique Locations", st.session_state.unique_locations)
+col3.metric("Geocoded Locations", st.session_state.success_count)
 
 # Create a map centered on Australia
 map_center = [-25.2744, 133.7751]
 job_map = folium.Map(location=map_center, zoom_start=5)
 
-# Add HeatMap
-HeatMap(location_data, radius=15, blur=10).add_to(job_map)
+# Add HeatMap if we have data
+if st.session_state.location_data:
+    HeatMap(st.session_state.location_data, radius=15, blur=10).add_to(job_map)
+else:
+    st.warning("No location data available to display on the map.")
 
 # Display the map
 st_folium(job_map, width=1200, height=600)
@@ -146,7 +248,9 @@ st_folium(job_map, width=1200, height=600)
 st.markdown("---")
 st.markdown("© 2025 - Job Location Heatmap")
 
-# Add button to force refresh
+# Add button to force refresh for convenience
 if st.button("Force Refresh Data"):
-    st.cache_data.clear()
-    st.experimental_rerun()
+    with st.spinner("Refreshing data..."):
+        fetch_and_process_data()
+        st.session_state.needs_rerun = True
+        st.rerun()
