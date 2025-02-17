@@ -18,7 +18,7 @@ This Streamlit app creates a heatmap of job postings across Australia, with data
 
 ## Deployment
 
-You can deploy this app on Streamlit Cloud for free:
+Can deploy this app on Streamlit Cloud for free:
 1. Push this code to your GitHub repository
 2. Connect your repository to [Streamlit Cloud](https://streamlit.io/cloud)
 3. Deploy the app
@@ -29,7 +29,7 @@ The app pulls data from a Google Sheet containing job listings. The sheet must h
 
 ## Configuration
 
-You can customize the app by modifying the following:
+Can customize the app by modifying the following:
 - Google Sheet URL in the `fetch_and_process_data()` function
 - Map center coordinates and zoom level
 - Heatmap parameters (radius, blur)
