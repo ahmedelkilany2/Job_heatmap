@@ -64,28 +64,28 @@ def fetch_and_process_data():
 
         # Setup geolocator with rate limiter
         geolocator = Nominatim(user_agent="job_location_geocoder", timeout=10)
-        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=3)
+        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=5)
 
-        # Function to get latitude & longitude
+        # Function to get latitude & longitude with retry mechanism
         def get_lat_lon(location):
             if location in geocode_cache:
                 return geocode_cache[location]
-
+            
             formatted_loc = f"{location}, Australia"
-            try:
-                geo = geocode(formatted_loc)
-                if geo and AU_LAT_MIN <= geo.latitude <= AU_LAT_MAX and AU_LON_MIN <= geo.longitude <= AU_LON_MAX:
-                    coords = (geo.latitude, geo.longitude)
-                    geocode_cache[location] = coords
-                    return coords
-            except GeocoderTimedOut:
-                return None
+            attempts = 0
+            while attempts < 3:
+                try:
+                    geo = geocode(formatted_loc)
+                    if geo and AU_LAT_MIN <= geo.latitude <= AU_LAT_MAX and AU_LON_MIN <= geo.longitude <= AU_LON_MAX:
+                        coords = (geo.latitude, geo.longitude)
+                        geocode_cache[location] = coords
+                        return coords
+                except GeocoderTimedOut:
+                    attempts += 1  # Retry on timeout
             return None
 
-        # Process locations efficiently
+        # Process locations efficiently, ensuring all locations are geocoded
         location_data = [get_lat_lon(loc) for loc in locations if loc]
-
-        # Remove None values and convert to NumPy array
         location_data = np.array([coords for coords in location_data if coords])
 
         # Save cache
