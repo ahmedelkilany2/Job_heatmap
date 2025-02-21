@@ -10,6 +10,7 @@ import datetime
 import os
 import json
 import numpy as np
+import time
 
 # Set page config
 st.set_page_config(
@@ -64,16 +65,16 @@ def fetch_and_process_data():
 
         # Setup geolocator with rate limiter
         geolocator = Nominatim(user_agent="job_location_geocoder", timeout=10)
-        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=5)
+        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=3)
 
-        # Function to get latitude & longitude with retry mechanism
-        def get_lat_lon(location):
+        # Function to get latitude & longitude
+        def get_lat_lon(location, retries=3):
+            """Attempts to geocode a location up to `retries` times before failing."""
             if location in geocode_cache:
                 return geocode_cache[location]
-            
+
             formatted_loc = f"{location}, Australia"
-            attempts = 0
-            while attempts < 3:
+            for attempt in range(retries):
                 try:
                     geo = geocode(formatted_loc)
                     if geo and AU_LAT_MIN <= geo.latitude <= AU_LAT_MAX and AU_LON_MIN <= geo.longitude <= AU_LON_MAX:
@@ -81,14 +82,16 @@ def fetch_and_process_data():
                         geocode_cache[location] = coords
                         return coords
                 except GeocoderTimedOut:
-                    attempts += 1  # Retry on timeout
+                    time.sleep(2)  # Wait before retrying
             return None
 
-        # Process locations efficiently, ensuring all locations are geocoded
+        # Process locations efficiently
         location_data = [get_lat_lon(loc) for loc in locations if loc]
+
+        # Remove None values and convert to NumPy array
         location_data = np.array([coords for coords in location_data if coords])
 
-        # Save cache
+        # Save cache after all geocoding attempts
         save_cache(geocode_cache)
 
         # Update session state
