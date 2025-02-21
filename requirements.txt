@@ -6,3 +6,4 @@ geopy
 plotly.express
 google-auth
 gspread
+seaborn
