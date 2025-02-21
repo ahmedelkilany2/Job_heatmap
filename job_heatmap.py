@@ -53,38 +53,59 @@ def fetch_and_process_data():
         sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv&gid=0"
         df = pd.read_csv(sheet_url)
 
-        # Remove empty locations and convert to string
+        # Remove empty locations and strip whitespace
+        df = df.dropna(subset=["location"])
         df["location"] = df["location"].astype(str).str.strip()
-        locations = df["location"].dropna().unique().tolist()
 
-        total_jobs = len(df['location'].dropna())
-        unique_locations = len(locations)
+        total_jobs = len(df)  # Total job postings
+        unique_locations = df["location"].nunique()  # Unique locations only
 
-        # Load cached results
+        # Load cached geocoding results
         geocode_cache = load_cache()
 
         # Setup geolocator
         geolocator = Nominatim(user_agent="job_location_geocoder", timeout=10)
         geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=3)
 
-        # Geocode function with retry logic
-        def get_lat_lon(location, retries=5):
-            """Attempts to geocode a location up to `retries` times before failing."""
+        # Function to get latitude & longitude
+        def get_lat_lon(location):
+            """Fetch latitude and longitude for a location, using cache when available."""
             if location in geocode_cache:
                 return geocode_cache[location]
 
             formatted_loc = f"{location}, Australia"  # Ensure proper format
-            for attempt in range(retries):
-                try:
-                    geo = geocode(formatted_loc)
-                    if geo and AU_LAT_MIN <= geo.latitude <= AU_LAT_MAX and AU_LON_MIN <= geo.longitude <= AU_LON_MAX:
-                        coords = (geo.latitude, geo.longitude)
-                        geocode_cache[location] = coords
-                        return coords
-                except (GeocoderTimedOut, GeocoderServiceError):
-                    time.sleep(random.uniform(2, 5))  # Prevent being blocked
+            try:
+                geo = geocode(formatted_loc)
+                if geo and AU_LAT_MIN <= geo.latitude <= AU_LAT_MAX and AU_LON_MIN <= geo.longitude <= AU_LON_MAX:
+                    coords = (geo.latitude, geo.longitude)
+                    geocode_cache[location] = coords  # Store in cache
+                    return coords
+            except (GeocoderTimedOut, GeocoderServiceError):
+                return None
+            return None
 
-            return None  # Return None if geocoding failed
+        # Geocode every job posting (including duplicates)
+        job_locations = df["location"].map(get_lat_lon).dropna().tolist()
+
+        # Save updated cache
+        save_cache(geocode_cache)
+
+        # Convert to NumPy array (remove None values)
+        job_locations = np.array([coords for coords in job_locations if coords])
+
+        # Update session state
+        st.session_state.last_update = datetime.datetime.now()
+
+        return {
+            'location_data': job_locations.tolist(),
+            'total_jobs': total_jobs,
+            'unique_locations': unique_locations,
+            'geocoded_count': len(job_locations)
+        }
+    except Exception as e:
+        st.error(f"Error processing data: {e}")
+        return None
+
 
         # Track failed locations
         failed_locations = []
