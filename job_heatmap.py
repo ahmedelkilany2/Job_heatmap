@@ -3,12 +3,13 @@ import folium
 from folium.plugins import HeatMap
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
-import time
+from geopy.extra.rate_limiter import RateLimiter
 import streamlit as st
 from streamlit_folium import st_folium
 import datetime
 import os
 import json
+import numpy as np
 
 # Set page config
 st.set_page_config(
@@ -31,14 +32,13 @@ st.sidebar.info("Data updates every 4 hours")
 # Cache file for geocoding results
 CACHE_FILE = "geocode_cache.json"
 
-# Load geocoding cache if it exists
+# Load and save cache functions
 def load_cache():
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'r') as f:
             return json.load(f)
     return {}
 
-# Save geocoding cache
 def save_cache(cache):
     with open(CACHE_FILE, 'w') as f:
         json.dump(cache, f)
@@ -50,94 +50,61 @@ AU_LON_MIN, AU_LON_MAX = 112, 154
 @st.cache_data(ttl=14400)  # Cache for 4 hours
 def fetch_and_process_data():
     try:
-        # Google Sheets CSV URL
         sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv&gid=0"
-        
-        # Load dataset from Google Sheets with error handling
         df = pd.read_csv(sheet_url)
-        
-        # Keep all job locations (don't remove duplicates)
-        locations = df["location"].dropna().tolist()
-        
-        # Log statistics
+
+        # Keep only non-empty locations
+        locations = df["location"].dropna().unique().tolist()
+
         total_jobs = len(df['location'].dropna())
-        unique_locations = len(set(locations))
-        
-        # Initialize geocoder and load cache
-        geolocator = Nominatim(user_agent="job_location_geocoder")
+        unique_locations = len(locations)
+
+        # Load cached geocodes
         geocode_cache = load_cache()
-        
-        # Function to get latitude & longitude within Australia's bounds
+
+        # Setup geolocator with rate limiter
+        geolocator = Nominatim(user_agent="job_location_geocoder", timeout=10)
+        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=3)
+
+        # Function to get latitude & longitude
         def get_lat_lon(location):
             if location in geocode_cache:
                 return geocode_cache[location]
-            
-            # Append "Victoria, Australia" if "VIC" is in location
-            formatted_loc = location.replace("VIC", "").strip() + ", Victoria, Australia" if "VIC" in location else location + ", Australia"
-            
-            for attempt in range(3):  # Retry up to 3 times
-                try:
-                    time.sleep(1)  # Delay to prevent rate limiting
-                    geo = geolocator.geocode(formatted_loc, timeout=10)  # Increased timeout
-                    if geo:
-                        lat, lon = geo.latitude, geo.longitude
-                        # Check if location is within Australia
-                        if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
-                            coords = (lat, lon)
-                            geocode_cache[location] = coords
-                            # Save cache every 10 locations
-                            if len(geocode_cache) % 10 == 0:
-                                save_cache(geocode_cache)
-                            return coords
-                except GeocoderTimedOut:
-                    time.sleep(2)  # Longer delay on timeout
-                    continue
-                except Exception as e:
-                    print(f"Error geocoding {location}: {e}")
-                    break
+
+            formatted_loc = f"{location}, Australia"
+            try:
+                geo = geocode(formatted_loc)
+                if geo and AU_LAT_MIN <= geo.latitude <= AU_LAT_MAX and AU_LON_MIN <= geo.longitude <= AU_LON_MAX:
+                    coords = (geo.latitude, geo.longitude)
+                    geocode_cache[location] = coords
+                    return coords
+            except GeocoderTimedOut:
+                return None
             return None
-        
-        # Convert locations to lat/lon with progress bar
-        location_data = []
-        failed_locations = []
-        
-        # Process in smaller batches
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for idx, loc in enumerate(locations):
-            status_text.text(f"Processing location {idx + 1} of {len(locations)}")
-            coords = get_lat_lon(loc)
-            if coords:
-                location_data.append(coords)
-            else:
-                failed_locations.append(loc)
-            progress_bar.progress((idx + 1) / len(locations))
-            
-            # Add a small delay between requests
-            time.sleep(0.5)
-        
-        progress_bar.empty()
-        status_text.empty()
-        
-        # Final cache save
+
+        # Process locations efficiently
+        location_data = [get_lat_lon(loc) for loc in locations if loc]
+
+        # Remove None values and convert to NumPy array
+        location_data = np.array([coords for coords in location_data if coords])
+
+        # Save cache
         save_cache(geocode_cache)
-        
+
         # Update session state
         st.session_state.last_update = datetime.datetime.now()
-        
+
         return {
-            'location_data': location_data,
+            'location_data': location_data.tolist(),
             'total_jobs': total_jobs,
             'unique_locations': unique_locations,
-            'failed_count': len(failed_locations),
-            'success_count': len(location_data)
+            'geocoded_count': len(location_data)
         }
     except Exception as e:
         st.error(f"Error processing data: {e}")
         return None
 
-# Get the data
+# Fetch and process data
 data = fetch_and_process_data()
 
 if data:
@@ -145,20 +112,17 @@ if data:
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Job Postings", data['total_jobs'])
     col2.metric("Unique Locations", data['unique_locations'])
-    col3.metric("Geocoded Locations", data['success_count'])
+    col3.metric("Geocoded Locations", data['geocoded_count'])
 
     # Create a map centered on Australia
-    map_center = [-25.2744, 133.7751]
-    job_map = folium.Map(location=map_center, zoom_start=5)
+    job_map = folium.Map(location=[-25.2744, 133.7751], zoom_start=5)
 
-    # Add HeatMap
-    if data['location_data']:
-        HeatMap(data['location_data'], radius=15, blur=10).add_to(job_map)
-        
-        # Display the map
+    # Add HeatMap if valid location data exists
+    if len(data['location_data']) > 0:
+        HeatMap(data['location_data'], radius=12, blur=8).add_to(job_map)
         st_folium(job_map, width=1200, height=600)
     else:
-        st.warning("No location data available to display on the map.")
+        st.warning("No valid location data to display on the map.")
 else:
     st.error("Failed to fetch or process data. Please try again later.")
 
@@ -166,7 +130,7 @@ else:
 st.markdown("---")
 st.markdown("© 2025 - Job Location Heatmap")
 
-# Add button to force refresh
+# Force Refresh Button
 if st.button("Force Refresh Data"):
     st.cache_data.clear()
     st.rerun()
