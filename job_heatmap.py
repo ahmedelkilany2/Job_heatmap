@@ -1,137 +1,56 @@
 import streamlit as st
 import pandas as pd
-import folium
-from folium.plugins import HeatMap
-from streamlit_folium import folium_static
+import plotly.express as px
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from google.oauth2 import service_account
-import pandas as pd
 
-# Google Sheets setup
-SCOPE = ['https://spreadsheets.google.com/feeds',
-         'https://www.googleapis.com/auth/drive']
+# Google Sheets API Setup
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/edit#gid=0"
 
-# Your Google Sheet URL
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/export?format=csv"
-SHEET_ID = SHEET_URL.split('/d/')[1].split('/')[0]
+# Authenticate and fetch Google Sheets data
+def load_google_sheets(sheet_url):
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    
+    # Path to your Google Service Account JSON key file
+    creds = ServiceAccountCredentials.from_json_keyfile_name("YOUR_SERVICE_ACCOUNT.json", scope)
+    client = gspread.authorize(creds)
 
-def init_google_sheets():
-    """Initialize Google Sheets connection"""
-    try:
-        credentials = service_account.Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=SCOPE
-        )
-        client = gspread.authorize(credentials)
-        return client
-    except Exception as e:
-        st.error(f"Error connecting to Google Sheets: {str(e)}")
-        return None
+    # Extract Google Sheets ID from URL
+    sheet_id = sheet_url.split("/d/")[1].split("/")[0]
+    sheet = client.open_by_key(sheet_id).sheet1
 
-def load_data_from_sheets():
-    """Load data directly from Google Sheets"""
-    try:
-        client = init_google_sheets()
-        if client is None:
-            return None
+    # Convert to DataFrame
+    data = pd.DataFrame(sheet.get_all_records())
+    return data
 
-        # Open the spreadsheet
-        sheet = client.open_by_key(SHEET_ID).sheet1
-        
-        # Get all values from the sheet
-        data = sheet.get_all_records()
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(data)
-        return df
-    
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        return None
+# Load Data
+try:
+    df = load_google_sheets(SHEET_URL)
+except Exception as e:
+    st.error(f"Error loading Google Sheets: {e}")
+    st.stop()
 
-def clean_data(df):
-    """Clean and prepare the location data"""
-    if df is None:
-        return None
-    
-    # Assuming columns are named 'latitude' and 'longitude'
-    # Adjust these based on your actual column names
-    required_columns = ['latitude', 'longitude']
-    
-    # Check if required columns exist
-    if not all(col in df.columns for col in required_columns):
-        st.error("Please ensure your data has 'latitude' and 'longitude' columns")
-        return None
-    
-    # Convert to numeric, replacing non-numeric values with NaN
-    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-    
-    # Remove any rows with missing coordinates
-    df = df.dropna(subset=required_columns)
-    
-    # Remove duplicates but keep track of frequency
-    location_counts = df.groupby(['latitude', 'longitude']).size().reset_index(name='count')
-    
-    return location_counts
+# Ensure the Location column exists
+if "Location" not in df.columns:
+    st.error("Error: 'Location' column not found in the Google Sheet.")
+    st.stop()
 
-def create_heatmap(data):
-    """Create a folium heatmap from the location data"""
-    # Calculate the center point for the map
-    center_lat = data['latitude'].mean()
-    center_lon = data['longitude'].mean()
-    
-    # Create the base map
-    m = folium.Map(location=[center_lat, center_lon], 
-                  zoom_start=10,
-                  tiles='CartoDB positron')
-    
-    # Prepare the heatmap data
-    heat_data = [[row['latitude'], row['longitude'], row['count']] 
-                 for idx, row in data.iterrows()]
-    
-    # Add the heatmap layer
-    HeatMap(heat_data,
-            min_opacity=0.4,
-            max_val=data['count'].max(),
-            radius=15, 
-            blur=15,
-            max_zoom=1).add_to(m)
-    
-    return m
+# Process Data - Count jobs per city
+city_counts = df["Location"].value_counts().reset_index()
+city_counts.columns = ["City", "Job Count"]
 
-def main():
-    st.title('Location Heatmap Visualization')
-    
-    # Add refresh button
-    if st.button('Refresh Data'):
-        st.experimental_rerun()
-    
-    # Load data from Google Sheets
-    with st.spinner('Loading data from Google Sheets...'):
-        df = load_data_from_sheets()
-    
-    if df is not None:
-        # Clean and prepare data
-        data = clean_data(df)
-        
-        if data is not None:
-            # Create and display the map
-            st.write("### Heatmap of Locations")
-            st.write(f"Total unique locations: {len(data)}")
-            
-            map_object = create_heatmap(data)
-            folium_static(map_object)
-            
-            # Display data statistics
-            st.write("### Data Summary")
-            st.write("Top 10 most frequent locations:")
-            st.dataframe(data.nlargest(10, 'count'))
-            
-            # Display raw data option
-            if st.checkbox('Show raw data'):
-                st.write(df)
+# Streamlit UI
+st.title("Job Distribution Heatmap (Jora Data)")
 
-if __name__ == "__main__":
-    main()
+# Interactive Heatmap using Plotly
+fig = px.density_mapbox(city_counts, 
+                        lat=[3.1390] * len(city_counts),  # Default to Kuala Lumpur for now
+                        lon=[101.6869] * len(city_counts),
+                        z="Job Count", 
+                        hover_name="City",
+                        radius=30,
+                        center={"lat": 3.1390, "lon": 101.6869},
+                        zoom=6,
+                        mapbox_style="carto-positron")
+
+st.plotly_chart(fig, use_container_width=True)
