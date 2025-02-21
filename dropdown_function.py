@@ -62,6 +62,7 @@ def plot_total_job_postings(df_full, df):
     percentage_filtered = (total_jobs / total_jobs_full) * 100 if total_jobs_full > 0 else 0
 
     st.metric(
+        label="Total Job Postings 💼",
         value=f"{total_jobs} out of   {total_jobs_full}",
         delta=f"{percentage_filtered:.2f}%",
     )
