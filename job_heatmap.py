@@ -109,14 +109,13 @@ def fetch_and_process_data():
                             geocode_cache[location] = coords
                             save_cache(geocode_cache)  # Save cache after each successful geocoding
                             return coords
-                return None
-                
-            except GeocoderTimedOut:
-                time.sleep(2)  # Longer delay on timeout
-                continue
-            except Exception as e:
-                st.warning(f"Error geocoding {location}: {e}")
-                return None
+                except GeocoderTimedOut:
+                    time.sleep(2)  # Longer delay on timeout
+                    continue
+                except Exception as e:
+                    st.warning(f"Error geocoding {location}: {e}")
+                    return None
+            return None
         
         # Convert locations to lat/lon with progress bar
         location_data = []
