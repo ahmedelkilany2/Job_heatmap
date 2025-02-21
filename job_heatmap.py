@@ -10,8 +10,6 @@ import datetime
 import os
 import json
 import numpy as np
-import time
-import random
 
 # Set Streamlit Page Config
 st.set_page_config(page_title="Job Location Heatmap", page_icon="🗺️", layout="wide")
@@ -84,11 +82,22 @@ def fetch_and_process_data():
                 return None
             return None
 
-        # Geocode every job posting (including duplicates)
-        job_locations = df["location"].map(get_lat_lon).dropna().tolist()
+        # Geocode unique locations first
+        failed_locations = []
+        location_data = {}
+        
+        for loc in df["location"].unique():
+            coords = get_lat_lon(loc)
+            if coords:
+                location_data[loc] = coords
+            else:
+                failed_locations.append(loc)
 
         # Save updated cache
         save_cache(geocode_cache)
+
+        # Apply geocoded data to all job postings
+        job_locations = df["location"].map(location_data.get).dropna().tolist()
 
         # Convert to NumPy array (remove None values)
         job_locations = np.array([coords for coords in job_locations if coords])
@@ -98,42 +107,6 @@ def fetch_and_process_data():
 
         return {
             'location_data': job_locations.tolist(),
-            'total_jobs': total_jobs,
-            'unique_locations': unique_locations,
-            'geocoded_count': len(job_locations)
-        }
-    except Exception as e:
-        st.error(f"Error processing data: {e}")
-        return None
-
-
-        # Track failed locations
-        failed_locations = []
-
-        # Process locations
-        location_data = []
-        for loc in locations:
-            coords = get_lat_lon(loc)
-            if coords:
-                location_data.append(coords)
-            else:
-                failed_locations.append(loc)
-
-        # Convert list to NumPy array (remove None values)
-        location_data = np.array([coords for coords in location_data if coords])
-
-        # Save updated cache
-        save_cache(geocode_cache)
-
-        # Debugging failed locations
-        if failed_locations:
-            st.warning(f"Failed to geocode {len(failed_locations)} locations. Sample: {failed_locations[:5]}")
-
-        # Update session state
-        st.session_state.last_update = datetime.datetime.now()
-
-        return {
-            'location_data': location_data.tolist(),
             'total_jobs': total_jobs,
             'unique_locations': unique_locations,
             'geocoded_count': len(location_data),
