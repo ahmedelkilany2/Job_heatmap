@@ -3,8 +3,6 @@ import pandas as pd
 import altair as alt
 import plotly.express as px
 import os
-from google.oauth2.service_account import Credentials
-import gspread
 
 # --- 1. Streamlit page configuration ---
 st.set_page_config(
