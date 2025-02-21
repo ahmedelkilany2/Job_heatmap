@@ -9,6 +9,9 @@ from streamlit_folium import st_folium
 import datetime
 import os
 import json
+from geopy.extra.rate_limiter import RateLimiter
+import concurrent.futures
+import requests.exceptions
 
 # Prevent Streamlit from sleeping
 st.set_page_config(
@@ -65,78 +68,105 @@ def save_cache(cache):
 AU_LAT_MIN, AU_LAT_MAX = -44, -10
 AU_LON_MIN, AU_LON_MAX = 112, 154
 
+def geocode_location(geolocator, location, geocode_cache):
+    """Geocode a single location with better error handling"""
+    if location in geocode_cache:
+        return location, geocode_cache[location]
+    
+    formatted_loc = location.replace("VIC", "").strip() + ", Victoria, Australia" if "VIC" in location else location + ", Australia"
+    
+    try:
+        geo = geolocator(formatted_loc, timeout=5)
+        if geo:
+            lat, lon = geo.latitude, geo.longitude
+            if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
+                coords = (lat, lon)
+                return location, coords
+    except (GeocoderTimedOut, requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+        st.warning(f"Timeout error for {location}: {str(e)}")
+    except Exception as e:
+        st.warning(f"Error geocoding {location}: {str(e)}")
+    
+    return location, None
+
 @st.cache_data(ttl=14400)  # Cache for 4 hours
 def fetch_and_process_data():
     try:
         # Google Sheets CSV URL
         sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv&gid=0"
         
-        # Load dataset from Google Sheets with error handling
+        # Load dataset from Google Sheets
         try:
             df = pd.read_csv(sheet_url)
         except Exception as e:
             st.error(f"Error loading data: {e}")
             return None
         
-        # Keep all job locations (don't remove duplicates)
-        locations = df["location"].dropna().tolist()
-        
-        # Log statistics
+        # Get unique locations to reduce API calls
+        locations = df["location"].dropna().unique().tolist()
         total_jobs = len(df['location'].dropna())
-        unique_locations = len(set(locations))
+        unique_locations = len(locations)
         
-        # Initialize geocoder and load cache
-        geolocator = Nominatim(user_agent="job_location_geocoder")
+        # Initialize geocoder with rate limiting
+        geolocator = Nominatim(user_agent="job_location_geocoder_batch")
+        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=2)
+        
+        # Load cache
         geocode_cache = load_cache()
         
-        # Function to get latitude & longitude within Australia's bounds
-        def get_lat_lon(location):
-            if location in geocode_cache:
-                return geocode_cache[location]
-            
-            # Append "Victoria, Australia" if "VIC" is in location
-            formatted_loc = location.replace("VIC", "").strip() + ", Victoria, Australia" if "VIC" in location else location + ", Australia"
-            
-            for attempt in range(3):  # Retry up to 3 times
-                try:
-                    time.sleep(1)  # Delay to prevent rate limiting
-                    geo = geolocator.geocode(formatted_loc)
-                    if geo:
-                        lat, lon = geo.latitude, geo.longitude
-                        # Check if location is within Australia
-                        if AU_LAT_MIN <= lat <= AU_LAT_MAX and AU_LON_MIN <= lon <= AU_LON_MAX:
-                            coords = (lat, lon)
-                            geocode_cache[location] = coords
-                            save_cache(geocode_cache)  # Save cache after each successful geocoding
-                            return coords
-                except GeocoderTimedOut:
-                    time.sleep(2)  # Longer delay on timeout
-                    continue
-                except Exception as e:
-                    st.warning(f"Error geocoding {location}: {e}")
-                    return None
-            return None
-        
-        # Convert locations to lat/lon with progress bar
+        # Process locations in batches
+        batch_size = 50
         location_data = []
         failed_locations = []
+        processed_count = 0
         
+        # Create progress bar
         progress_bar = st.progress(0)
-        for idx, loc in enumerate(locations):
-            coords = get_lat_lon(loc)
-            if coords:
-                location_data.append(coords)
-            else:
-                failed_locations.append(loc)
-            progress_bar.progress((idx + 1) / len(locations))
+        status_text = st.empty()
+        
+        # Process locations in batches
+        for i in range(0, len(locations), batch_size):
+            batch = locations[i:i + batch_size]
+            status_text.text(f"Processing batch {i//batch_size + 1} of {(len(locations) + batch_size - 1)//batch_size}")
+            
+            # Process batch with parallel execution
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                future_to_location = {
+                    executor.submit(geocode_location, geocode, loc, geocode_cache): loc 
+                    for loc in batch
+                }
+                
+                for future in concurrent.futures.as_completed(future_to_location):
+                    location, coords = future.result()
+                    if coords:
+                        location_data.append(coords)
+                        geocode_cache[location] = coords
+                    else:
+                        failed_locations.append(location)
+                    
+                    processed_count += 1
+                    progress_bar.progress(processed_count / len(locations))
+            
+            # Save cache after each batch
+            save_cache(geocode_cache)
+            
+            # Add a small delay between batches
+            time.sleep(2)
         
         progress_bar.empty()
+        status_text.empty()
         
         # Update session state
         st.session_state.last_update = datetime.datetime.now()
         
+        # Count actual job positions (not just unique locations)
+        final_locations = []
+        for _, row in df.iterrows():
+            if row['location'] in geocode_cache:
+                final_locations.append(geocode_cache[row['location']])
+        
         return {
-            'location_data': location_data,
+            'location_data': final_locations,
             'total_jobs': total_jobs,
             'unique_locations': unique_locations,
             'failed_count': len(failed_locations),
@@ -154,10 +184,11 @@ data = fetch_and_process_data()
 
 if data:
     # Display statistics
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Job Postings", data['total_jobs'])
     col2.metric("Unique Locations", data['unique_locations'])
-    col3.metric("Geocoded Locations", data['success_count'])
+    col3.metric("Successfully Geocoded", data['success_count'])
+    col4.metric("Failed Geocoding", data['failed_count'])
 
     # Create a map centered on Australia
     map_center = [-25.2744, 133.7751]
