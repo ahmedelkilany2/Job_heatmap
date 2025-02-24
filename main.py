@@ -3,7 +3,7 @@ import importlib
 
 st.set_page_config(page_title="Job Market Analysis", layout="wide")
 
-st.title("Job Market Analysis Dashboards")
+st.title("Job Analysis Dashboards")
 
 # Create a radio button to select the dashboard
 dashboard_selection = st.radio(
