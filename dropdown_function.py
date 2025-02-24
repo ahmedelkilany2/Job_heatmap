@@ -33,6 +33,22 @@ def load_data():
             st.error("Error: The Google Sheet must contain 'latitude' and 'longitude' columns.")
             return None
 
+        # Convert latitude and longitude to numeric, handling errors
+        df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
+        df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+
+        # Remove rows with NaN values in latitude or longitude
+        df = df.dropna(subset=['latitude', 'longitude'])
+
+        if df.empty:
+            st.warning("No valid location data found.")
+            return None
+
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
+
 # --- 3. Plotting Functions ---
 # --- Chart 1 ---
 def plot_total_job_postings(df_full, df):
