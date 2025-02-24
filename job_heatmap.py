@@ -4,12 +4,13 @@ import folium
 from streamlit_folium import folium_static
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
+from folium.plugins import HeatMap
 import time
 
 # Streamlit Page Config
-st.set_page_config(page_title="Job Location Heatmap", layout="wide")
+st.set_page_config(page_title="Job Posting Heatmap", layout="wide")
 
-# Google Sheets URL (MUST be in CSV format)
+# Google Sheets URL (must be in CSV format)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
 
 @st.cache_data(ttl=14400)  # Cache data for 4 hours (14400 seconds)
@@ -50,28 +51,12 @@ if df is not None:
     df = df.dropna(subset=["lat", "lon"])  # Remove rows with missing coordinates
 
     # Create Map
-    st.subheader("📍 Job Location Heatmap")
+    st.subheader("📍 Job Posting Density Heatmap")
     m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Default: Victoria, Australia
 
-    # Add Markers
-    for _, row in df.iterrows():
-        folium.Marker(
-            location=[row["lat"], row["lon"]],
-            popup=row["location"],
-            icon=folium.Icon(color="blue", icon="cloud")
-        ).add_to(m)
+    # Add Heatmap
+    heat_data = df[["lat", "lon"]].values.tolist()
+    HeatMap(heat_data, radius=15, blur=10).add_to(m)
 
     # Display Map
     folium_static(m)
-
-# Auto Refresh
-st.markdown("""
-<script>
-    function autoRefresh() {
-        setTimeout(function() {
-            location.reload();
-        }, 14400000); // Refresh every 4 hours (14400 seconds)
-    }
-    autoRefresh();
-</script>
-""", unsafe_allow_html=True)
