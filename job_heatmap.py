@@ -6,7 +6,6 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 from folium.plugins import HeatMap
 import time
-from streamlit_autorefresh import st_autorefresh
 import streamlit_analytics as sa
 
 # Reload page every 4 hours (14400 seconds)
