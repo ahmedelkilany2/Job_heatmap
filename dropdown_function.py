@@ -18,8 +18,8 @@ st.title("Adzuna Job Scraping Analysis - Australia 📊")
 st.markdown("This is an interactive dashboard to analyze job postings data scraped from Adzuna website.")
 
 # --- 2. Data Loading ---
-# Google Sheets CSV URL
-sheet_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/export?format=csv"
+# Modified Google Sheets CSV URL
+sheet_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/export?format=csv&gid=553613618"
 
 # Cache
 @st.cache_data
