@@ -8,7 +8,7 @@ from folium.plugins import HeatMap
 import time
 
 # Streamlit Page Config
-st.set_page_config(page_title="Job Posting Heatmap", layout="wide")
+st.set_page_config(page_title="Jora Job Scraping Analysis - Australia 📊", layout="wide")
 
 # Google Sheets URL (must be in CSV format)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
