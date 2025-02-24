@@ -6,12 +6,6 @@ import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 
-# --- 1. Streamlit page configuration ---
-st.set_page_config(
-    page_title="Adzuna Job Scraping Analysis",
-    page_icon="📊",
-    layout="wide",
-)
 
 # Title and description
 st.title("Adzuna Job Scraping Analysis - Australia 📊")
