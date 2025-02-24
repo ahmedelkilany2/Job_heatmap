@@ -18,8 +18,8 @@ st.title("Adzuna Job Scraping Analysis - Australia 📊")
 st.markdown("This is an interactive dashboard to analyze job postings data scraped from Adzuna website.")
 
 # --- 2. Data Loading ---
-# Google Sheets CSV URL
-sheet_url = "https://docs.google.com/spreadsheets/d/1VTMPy-dvropKZANZeMJMxfuRmFrAYJ2YFC1kbLznT9Q/export?format=csv"
+# Modified Google Sheets CSV URL
+sheet_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/export?format=csv&gid=553613618"
 
 # Cache
 @st.cache_data
@@ -102,9 +102,9 @@ def plot_job_postings_by_categories(df):
 
     fig = px.bar(category_counts, x='count', y='category',
                  labels={'count': 'Number of Jobs', 'category': 'Category'},
-                 color='category')  # Add color for better visualization
+                 color='category')
 
-    fig.update_layout(yaxis={'categoryorder':'total ascending'}, height=1200, showlegend=False) # Sort in descending order
+    fig.update_layout(yaxis={'categoryorder':'total ascending'}, height=1200, showlegend=False)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -120,7 +120,7 @@ def make_donut(input_response, input_text, input_color):
     elif input_color == 'red':
         chart_color = ['#E74C3C', '#781F16']
     else:
-        chart_color = ['#AAAAAA', '#555555']  # Default gray
+        chart_color = ['#AAAAAA', '#555555']
 
     source = pd.DataFrame({
         "Topic": ['', input_text],
@@ -207,39 +207,6 @@ def plot_contract_type_donuts(df):
         st.subheader("Permanent")
         st.altair_chart(permanent_donut, use_container_width=True)
 
-# --- Chart 6 ---
-def plot_total_jobs_by_day(df):
-    """
-    Plots the total number of job postings by day of the week using Plotly Express.
-    """
-    if df is None:
-        st.warning("Cannot plot total jobs by day: Data loading failed.")
-        return
-
-    # Group by day of the week and count the postings
-    day_counts = df['Day'].value_counts().reset_index()
-    day_counts.columns = ['Day', 'count']
-
-    # Order days of the week
-    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    day_counts['Day'] = pd.Categorical(day_counts['Day'], categories=day_order, ordered=True)
-    day_counts = day_counts.sort_values('Day')
-
-    # Create the Plotly Express bar chart
-    fig = px.bar(
-        day_counts,
-        x='Day',
-        y='count',
-        labels={'Day': 'Day of the Week', 'count': 'Number of Job Postings'},
-        color='Day',  # Add color based on the Day
-        height = 300
-    )
-
-    # Remove the legend (side guide)
-    fig.update_layout(showlegend=False)  # Add this line to remove the legend
-
-    st.plotly_chart(fig, use_container_width=True)
-
 # --- Chart 7 ---
 def plot_salary_range_by_category(df):
     """Plots the salary range by top 10 job categories using a box plot."""
@@ -255,8 +222,8 @@ def plot_salary_range_by_category(df):
         df_cleaned['salary_min'] = pd.to_numeric(df_cleaned['salary_min'])
         df_cleaned['salary_max'] = pd.to_numeric(df_cleaned['salary_max'])
     except ValueError:
-        st.error("Could not convert salary columns to numeric.  Check your data.")
-        return # Stop if there's a conversion error
+        st.error("Could not convert salary columns to numeric. Check your data.")
+        return
 
     # Calculate average salary
     df_cleaned['average_salary'] = (df_cleaned['salary_min'] + df_cleaned['salary_max']) / 2
@@ -275,30 +242,28 @@ def plot_salary_range_by_category(df):
 
     # Create the Altair box plot
     chart = alt.Chart(df_top_10).mark_boxplot().encode(
-        y=alt.Y('category:N', title='Job Category', sort=category_order),  # Sort by median salary
-        x=alt.X('average_salary:Q', title='Average Salary', scale=alt.Scale(zero=False)),  # Set zero=False for better visualization
+        y=alt.Y('category:N', title='Job Category', sort=category_order),
+        x=alt.X('average_salary:Q', title='Average Salary', scale=alt.Scale(zero=False)),
         tooltip=['category', 'salary_min', 'salary_max', 'average_salary']
     ).properties(
-        height = 500
+        height=500
     )
 
     st.altair_chart(chart, use_container_width=True)
 
-
 # --- 4. Main App ---
-df_full = load_data()  # this is to load and store whole dataset without filtering
+df_full = load_data()
 
 if df_full is not None:
-
     # --- Creating dropdown filtering sidebar ---
     st.sidebar.header("Filters")
 
     try:
-        category_options = df_full['category'].unique().tolist() # Convert to list
-        contract_type_options = df_full['contract_type'].unique().tolist()  # Convert to list
-        contract_time_options = df_full['contract_time'].unique().tolist()  # Convert to list
+        category_options = df_full['category'].unique().tolist()
+        contract_type_options = df_full['contract_type'].unique().tolist()
+        contract_time_options = df_full['contract_time'].unique().tolist()
     except KeyError as e:
-        st.error(f"Error: Column '{e}' not found in DataFrame. Check your Google Sheet column names and code.  The available columns are in the dataframe preview above.")
+        st.error(f"Error: Column '{e}' not found in DataFrame. Check your Google Sheet column names and code.")
         st.stop()
         category_options = []
         contract_type_options = []
@@ -309,7 +274,6 @@ if df_full is not None:
     contract_type_options = ['All'] + contract_type_options
     contract_time_options = ['All'] + contract_time_options
 
-    
     category_filter = st.sidebar.multiselect(
         "Category", options=category_options, default=['All']
     )
@@ -339,38 +303,29 @@ if df_full is not None:
 
     filtered_df = filter_dataframe(df_full, contract_type_filter, contract_time_filter, category_filter)
 
-
-
     # Check that there are rows in the filtered dataframe:
     if not filtered_df.empty:
-        # --- Main Area Dashboard Layout (organize the charts)---
-        col1, col2, col3 = st.columns([2, 4, 2])  # You can adjust the proportions of the columns
+        # --- Main Area Dashboard Layout ---
+        col1, col2, col3 = st.columns([2, 4, 2])
 
         with col1:
             st.subheader("Total Job Postings 💼")
             plot_total_job_postings(df_full, filtered_df)
-            st.subheader("Total Job Postings by day")
-            plot_total_jobs_by_day(filtered_df)
             st.subheader("Contract Time")
             plot_contract_time_donuts(filtered_df)
             st.subheader("Contract Type")
             plot_contract_type_donuts(filtered_df)
-            # add more charts
 
         with col2:
             st.subheader("Job Posting Density Heatmap 🔍")  
             plot_job_density_heatmap(filtered_df)
             st.subheader("Top 10 Salary and its Range")
             plot_salary_range_by_category(filtered_df)
-            # add more charts
 
         with col3:
             st.subheader("Total Job Postings Job Categories")
             plot_job_postings_by_categories(filtered_df)
 
-        # if you want more colmn just increas number and repeat same with col4: but each colmn will be bit narrow....
-
-        # This chart will be plotted across col1 to col3
         if st.checkbox("Show Raw Data"):
             st.subheader("Raw Data")
             st.dataframe(filtered_df)
