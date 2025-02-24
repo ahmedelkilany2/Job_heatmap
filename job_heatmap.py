@@ -35,8 +35,8 @@ df = load_data()
 if df is not None:
     st.success("✅ Data Loaded Successfully!")
 
-    # Filter Locations in Australia (Basic Check)
-    df = df[df["location"].str.contains("Australia", case=False, na=False)]
+    # Filter Locations in Australia
+    df = df[df["location"].str.contains("Australia", case=False, na=False)].copy()
 
     # Initialize Geocoder
     geolocator = Nominatim(user_agent="job_heatmap")
@@ -47,13 +47,13 @@ if df is not None:
         try:
             loc = geolocator.geocode(location, timeout=10, country_codes="au")
             if loc:
-                return loc.latitude, loc.longitude
+                return pd.Series([loc.latitude, loc.longitude])
         except GeocoderTimedOut:
             time.sleep(1)  # Wait and retry
-        return None, None
+        return pd.Series([None, None])
 
-    # Apply geocoding
-    df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
+    # Apply geocoding and expand into 'lat' & 'lon' columns
+    df[["lat", "lon"]] = df["location"].apply(geocode_location)
 
     # Remove failed geocodes
     df = df.dropna(subset=["lat", "lon"])
@@ -73,7 +73,7 @@ if df is not None:
     m = folium.Map(location=[-25.2744, 133.7751], zoom_start=4)  # Centered in Australia
 
     # Add Heatmap
-    heat_data = df[["lat", "lon"]].values.tolist()
+    heat_data = df[["lat", "lon"]].dropna().values.tolist()
     HeatMap(heat_data, radius=15, blur=10).add_to(m)
 
     # Display Map
