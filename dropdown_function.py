@@ -19,7 +19,7 @@ st.markdown("This is an interactive dashboard to analyze job postings data scrap
 
 # --- 2. Data Loading ---
 # Google Sheets CSV URL
-sheet_url = "YOUR_SHEET_URL"  # Replace with your actual Google Sheets URL
+sheet_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/edit?gid=553613618#gid=553613618"
 
 # Cache
 @st.cache_data
