@@ -9,11 +9,9 @@ import time
 from streamlit_autorefresh import st_autorefresh
 import streamlit_analytics as sa
 
-# Prevent Streamlit from sleeping
-sa.start_tracking()
-
-# Auto-refresh every 4 hours (14400 seconds)
-st_autorefresh(interval=14400 * 1000, key="refresh")
+# Reload page every 4 hours (14400 seconds)
+time.sleep(14400)
+st.experimental_rerun()
 
 # Google Sheets URL (CSV export link)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQub8XWScX6fHhlfMzgIbm_Uh6oFX8eVafOsz3RGKzM5jT_ZlwNBlxlmQFYgF4oUAA/pub?output=csv"
