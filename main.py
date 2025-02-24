@@ -1,4 +1,5 @@
 import streamlit as st
+import importlib
 
 st.set_page_config(page_title="Job Market Analysis", layout="wide")
 
@@ -10,7 +11,12 @@ dashboard_selection = st.radio(
     ("Adzuna Job Analysis", "Jora Job Analysis")
 )
 
-if dashboard_selection == "Adzuna Job Analysis":
-    import dropdown_function
-elif dashboard_selection == "Jora Job Analysis":
-    import job_heatmap
+# Dictionary to map selection to module names
+modules = {
+    "Adzuna Job Analysis": "dropdown_function",
+    "Jora Job Analysis": "job_heatmap"
+}
+
+# Dynamically import the selected module
+module_name = modules[dashboard_selection]
+module = importlib.import_module(module_name)
