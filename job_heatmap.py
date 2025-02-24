@@ -8,15 +8,12 @@ from folium.plugins import HeatMap
 import time
 
 # Streamlit Page Config
-st.set_page_config(page_title="Jora Job Scraping Analysis - Australia 📊", layout="wide")
+st.set_page_config(page_title="Job Posting Heatmap", layout="wide")
 
-# Display Title
-st.title("Jora Job Scraping Analysis - Australia 📊")
-
-# Google Sheets URL (Must be in CSV format & Public)
+# Google Sheets URL (must be in CSV format)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
 
-@st.cache_data(ttl=14400)  # Cache data for 4 hours
+@st.cache_data(ttl=14400)  # Cache data for 4 hours (14400 seconds)
 def load_data():
     """Load job location data from Google Sheets."""
     try:
@@ -35,45 +32,30 @@ df = load_data()
 if df is not None:
     st.success("✅ Data Loaded Successfully!")
 
-    # Filter Locations in Australia
-    df = df[df["location"].str.contains("Australia", case=False, na=False)].copy()
-
-    # Initialize Geocoder
+    # Initialize geocoder
     geolocator = Nominatim(user_agent="job_heatmap")
 
     @st.cache_data(ttl=14400)  # Cache geocoded locations for 4 hours
     def geocode_location(location):
         """Convert location names to latitude & longitude."""
         try:
-            loc = geolocator.geocode(location, timeout=10, country_codes="au")
+            loc = geolocator.geocode(location, timeout=10)
             if loc:
                 return loc.latitude, loc.longitude
         except GeocoderTimedOut:
             time.sleep(1)  # Wait and retry
-        return None, None  # Ensure two values are returned
+        return None, None
 
-    # Apply geocoding and expand into 'lat' & 'lon' columns
-    df[["lat", "lon"]] = df["location"].apply(lambda x: pd.Series(geocode_location(x)))
-
-    # Remove failed geocodes
-    df.dropna(subset=["lat", "lon"], inplace=True)
-
-    # Display Key Stats
-    total_locations = len(df)
-    unique_locations = df["location"].nunique()
-    successfully_geocoded = len(df)
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("📍 Total Job Locations", total_locations)
-    col2.metric("📍 Unique Locations", unique_locations)
-    col3.metric("✅ Successfully Geocoded", successfully_geocoded)
+    # Apply geocoding
+    df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
+    df = df.dropna(subset=["lat", "lon"])  # Remove rows with missing coordinates
 
     # Create Map
-    st.subheader("📍 Job Posting Density Heatmap (Australia)")
-    m = folium.Map(location=[-25.2744, 133.7751], zoom_start=4)  # Centered in Australia
+    st.subheader("📍 Job Posting Density Heatmap")
+    m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Default: Victoria, Australia
 
     # Add Heatmap
-    heat_data = df[["lat", "lon"]].dropna().values.tolist()
+    heat_data = df[["lat", "lon"]].values.tolist()
     HeatMap(heat_data, radius=15, blur=10).add_to(m)
 
     # Display Map
