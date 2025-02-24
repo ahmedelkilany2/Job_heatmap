@@ -18,16 +18,22 @@ st.title("Adzuna Job Scraping Analysis - Australia 📊")
 st.markdown("This is an interactive dashboard to analyze job postings data scraped from Adzuna website.")
 
 # --- 2. Data Loading ---
-# Google Sheets CSV URL
-sheet_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/edit?gid=553613618#gid=553613618"
+# Convert edit URL to export URL
+sheet_id = "154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k"
+gid = "553613618"
+sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
 
-# Cache
 @st.cache_data
 def load_data():
     """Loads data from Google Sheets CSV URL."""
     try:
-        # Load the data
-        df = pd.read_csv(sheet_url)
+        # Load the data with more robust CSV reading parameters
+        df = pd.read_csv(
+            sheet_url,
+            on_bad_lines='warn',  # Don't fail on problematic lines
+            encoding='utf-8',     # Specify encoding
+            low_memory=False      # Handle large files better
+        )
         
         # First, show a preview of the DataFrame columns to help with debugging
         st.sidebar.write("Available columns:", df.columns.tolist())
@@ -35,6 +41,9 @@ def load_data():
         # Rename day_of_week to Day to match the rest of the code
         if 'day_of_week' in df.columns:
             df = df.rename(columns={'day_of_week': 'Day'})
+        
+        # Clean up column names (remove any whitespace)
+        df.columns = df.columns.str.strip()
         
         # Validate required columns exist
         required_columns = ['latitude', 'longitude', 'category', 'contract_type', 'contract_time', 'Day', 'salary_min', 'salary_max']
@@ -46,6 +55,41 @@ def load_data():
             st.write("Expected columns:", required_columns)
             st.write("Found columns:", df.columns.tolist())
             return None
+            
+        # Convert latitude and longitude to numeric, handling errors
+        df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
+        df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+        
+        # Remove rows with NaN values in latitude or longitude
+        df = df.dropna(subset=['latitude', 'longitude'])
+        
+        if df.empty:
+            st.warning("No valid location data found after cleaning.")
+            return None
+            
+        # Convert salary columns to numeric if they exist
+        if 'salary_min' in df.columns and 'salary_max' in df.columns:
+            df['salary_min'] = pd.to_numeric(df['salary_min'], errors='coerce')
+            df['salary_max'] = pd.to_numeric(df['salary_max'], errors='coerce')
+        
+        # Display data shape for debugging
+        st.sidebar.write(f"Data shape: {df.shape}")
+        
+        return df
+        
+    except pd.errors.EmptyDataError:
+        st.error("The CSV file is empty.")
+        return None
+    except FileNotFoundError:
+        st.error("Could not access the Google Sheet. Please check the URL and sharing settings.")
+        return None
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        st.error("Troubleshooting steps:")
+        st.error("1. Check if the sheet is published to web (File → Share → Publish to web)")
+        st.error("2. Verify sharing settings (Anyone with link → Viewer)")
+        st.error("3. Check for any merged cells or formatting issues in your sheet")
+        return None
             
         # Convert latitude and longitude to numeric, handling errors
         df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
