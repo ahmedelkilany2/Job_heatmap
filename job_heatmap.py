@@ -1,150 +1,128 @@
+import streamlit as st
 import pandas as pd
 import folium
 from folium.plugins import HeatMap
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-from geopy.extra.rate_limiter import RateLimiter
-import streamlit as st
 from streamlit_folium import st_folium
-import datetime
-import os
-import json
-import numpy as np
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+import time
 
-# Set Streamlit Page Config
-st.set_page_config(page_title="Job Location Heatmap", page_icon="🗺️", layout="wide")
+# --- 1. Streamlit page configuration ---
+st.set_page_config(
+    page_title="Jora Job Analysis",
+    page_icon="📊",
+    layout="wide",
+)
 
-# Title and Description
-st.title("Job Location Heatmap - Australia")
-st.markdown("This map shows the distribution of job postings across Australia.")
+# Title and description
+st.title("Jora Job Scraping Analysis - Australia 📊")
+st.markdown("Interactive dashboard analyzing job postings data scraped from Jora website.")
 
-# Show last update time
-if 'last_update' not in st.session_state:
-    st.session_state.last_update = datetime.datetime.now()
+# --- 2. Data Loading and Processing ---
+# Modified Google Sheets CSV URL
+sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/export?format=csv&gid=0"
 
-st.sidebar.info(f"Last updated: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M:%S')}")
-st.sidebar.info("Data updates every 4 hours")
-
-# Cache file for geocoding
-CACHE_FILE = "geocode_cache.json"
-
-def load_cache():
-    """Loads cached geocode results."""
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r') as f:
-            return json.load(f)
-    return {}
-
-def save_cache(cache):
-    """Saves geocode results to cache."""
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(cache, f)
-
-# Define valid Australia lat/lon ranges
-AU_LAT_MIN, AU_LAT_MAX = -44, -10
-AU_LON_MIN, AU_LON_MAX = 112, 154
-
-@st.cache_data(ttl=14400)  # Cache for 4 hours
-def fetch_and_process_data():
-    """Fetch job locations, geocode them, and prepare data for the heatmap."""
+@st.cache_data
+def load_data():
+    """Loads data from Google Sheets CSV URL."""
     try:
-        sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv&gid=0"
         df = pd.read_csv(sheet_url)
-
-        # Remove empty locations and strip whitespace
-        df = df.dropna(subset=["location"])
-        df["location"] = df["location"].astype(str).str.strip()
-
-        total_jobs = len(df)  # Total job postings
-        unique_locations = df["location"].nunique()  # Unique locations only
-
-        # Load cached geocoding results
-        geocode_cache = load_cache()
-
-        # Setup geolocator
-        geolocator = Nominatim(user_agent="job_location_geocoder", timeout=10)
-        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1, max_retries=3)
-
-        # Function to get latitude & longitude
-        def get_lat_lon(location):
-            """Fetch latitude and longitude for a location, using cache when available."""
-            if location in geocode_cache:
-                return geocode_cache[location]
-
-            formatted_loc = f"{location}, Australia"  # Ensure proper format
-            try:
-                geo = geocode(formatted_loc)
-                if geo and AU_LAT_MIN <= geo.latitude <= AU_LAT_MAX and AU_LON_MIN <= geo.longitude <= AU_LON_MAX:
-                    coords = (geo.latitude, geo.longitude)
-                    geocode_cache[location] = coords  # Store in cache
-                    return coords
-            except (GeocoderTimedOut, GeocoderServiceError):
-                return None
-            return None
-
-        # Geocode unique locations first
-        failed_locations = []
-        location_data = {}
-        
-        for loc in df["location"].unique():
-            coords = get_lat_lon(loc)
-            if coords:
-                location_data[loc] = coords
-            else:
-                failed_locations.append(loc)
-
-        # Save updated cache
-        save_cache(geocode_cache)
-
-        # Apply geocoded data to all job postings
-        job_locations = df["location"].map(location_data.get).dropna().tolist()
-
-        # Convert to NumPy array (remove None values)
-        job_locations = np.array([coords for coords in job_locations if coords])
-
-        # Update session state
-        st.session_state.last_update = datetime.datetime.now()
-
-        return {
-            'location_data': job_locations.tolist(),
-            'total_jobs': total_jobs,
-            'unique_locations': unique_locations,
-            'geocoded_count': len(location_data),
-            'failed_locations': failed_locations
-        }
+        return df
     except Exception as e:
-        st.error(f"Error processing data: {e}")
+        st.error(f"Error loading data: {e}")
         return None
 
-# Fetch and process data
-data = fetch_and_process_data()
+@st.cache_data
+def geocode_locations(locations):
+    """
+    Geocodes a list of locations to get their coordinates.
+    Uses caching to avoid re-geocoding the same locations.
+    """
+    geolocator = Nominatim(user_agent="my_job_analysis_app")
+    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
+    
+    coordinates = {}
+    for loc in locations:
+        try:
+            # Add 'Australia' to the location string to improve accuracy
+            location_str = f"{loc}, Australia"
+            location = geocode(location_str)
+            if location:
+                coordinates[loc] = (location.latitude, location.longitude)
+            else:
+                st.warning(f"Could not geocode location: {loc}")
+                coordinates[loc] = None
+            time.sleep(1)  # Additional delay to respect rate limits
+        except Exception as e:
+            st.warning(f"Error geocoding {loc}: {str(e)}")
+            coordinates[loc] = None
+    
+    return coordinates
 
-if data:
-    # Display statistics
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Job Postings", data['total_jobs'])
-    col2.metric("Unique Locations", data['unique_locations'])
-    col3.metric("Geocoded Locations", data['geocoded_count'])
+def create_location_heatmap(df):
+    """Creates a heatmap of job locations."""
+    if df is None or 'location' not in df.columns:
+        st.error("Required location data not found in the dataset.")
+        return
+    
+    # Get unique locations
+    unique_locations = df['location'].unique()
+    
+    # Show progress
+    with st.spinner('Geocoding locations... This may take a few minutes.'):
+        coordinates_dict = geocode_locations(unique_locations)
+    
+    # Create a list of coordinates with their counts
+    location_data = []
+    for loc in df['location']:
+        if coordinates_dict.get(loc):
+            location_data.append(coordinates_dict[loc])
+    
+    if not location_data:
+        st.error("No valid coordinates found for the locations.")
+        return
+    
+    # Create the map centered on Australia
+    m = folium.Map(location=[-25.2744, 133.7751], zoom_start=4)
+    
+    # Add the heatmap layer
+    HeatMap(location_data, radius=15, blur=10).add_to(m)
+    
+    # Display the map
+    st_folium(m, height=600, width=None)
 
-    # Show failed locations if any
-    if data["failed_locations"]:
-        st.write("❌ **Failed to geocode the following locations:**")
-        st.write(data["failed_locations"][:10])  # Show only first 10
-
-    # Create a map centered on Australia
-    job_map = folium.Map(location=[-25.2744, 133.7751], zoom_start=5)
-
-    # Add HeatMap if data exists
-    if len(data['location_data']) > 0:
-        HeatMap(data['location_data'], radius=12, blur=8).add_to(job_map)
-        st_folium(job_map, width=1200, height=600)
+# --- 3. Main Dashboard Layout ---
+def main():
+    # Load the data
+    df = load_data()
+    
+    if df is not None:
+        # Display basic statistics
+        st.subheader("Dataset Overview")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Total Job Postings", len(df))
+        
+        with col2:
+            unique_locations = len(df['location'].unique())
+            st.metric("Unique Locations", unique_locations)
+        
+        with col3:
+            if 'category' in df.columns:
+                unique_categories = len(df['category'].unique())
+                st.metric("Job Categories", unique_categories)
+        
+        # Display the heatmap
+        st.subheader("Job Posting Locations Heatmap 🗺️")
+        create_location_heatmap(df)
+        
+        # Optional: Show raw data
+        if st.checkbox("Show Raw Data"):
+            st.subheader("Raw Data")
+            st.dataframe(df)
     else:
-        st.warning("No valid location data to display on the map.")
+        st.error("Failed to load data. Please check the Google Sheets URL and try again.")
 
-else:
-    st.error("Failed to fetch or process data. Please try again later.")
-
-# Force Refresh Button
-if st.button("Force Refresh Data"):
-    st.cache_data.clear()
-    st.rerun()
+if __name__ == "__main__":
+    main()
