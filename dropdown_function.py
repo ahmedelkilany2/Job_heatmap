@@ -26,27 +26,48 @@ sheet_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw
 def load_data():
     """Loads data from Google Sheets CSV URL."""
     try:
+        # Load the data
         df = pd.read_csv(sheet_url)
-
-        # Check if 'latitude' and 'longitude' columns exist
-        if 'latitude' not in df.columns or 'longitude' not in df.columns:
-            st.error("Error: The Google Sheet must contain 'latitude' and 'longitude' columns.")
+        
+        # First, show a preview of the DataFrame columns to help with debugging
+        st.sidebar.write("Available columns:", df.columns.tolist())
+        
+        # Validate required columns exist
+        required_columns = ['latitude', 'longitude', 'category', 'contract_type', 'contract_time', 'Day', 'salary_min', 'salary_max']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            st.error(f"Error: Missing required columns: {', '.join(missing_columns)}")
+            st.error("Please ensure your Google Sheet has all required columns.")
             return None
-
+            
         # Convert latitude and longitude to numeric, handling errors
         df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
         df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-
+        
         # Remove rows with NaN values in latitude or longitude
         df = df.dropna(subset=['latitude', 'longitude'])
-
+        
         if df.empty:
-            st.warning("No valid location data found.")
+            st.warning("No valid location data found after cleaning.")
             return None
-
+            
+        # Convert salary columns to numeric if they exist
+        if 'salary_min' in df.columns and 'salary_max' in df.columns:
+            df['salary_min'] = pd.to_numeric(df['salary_min'], errors='coerce')
+            df['salary_max'] = pd.to_numeric(df['salary_max'], errors='coerce')
+        
         return df
+        
+    except pd.errors.EmptyDataError:
+        st.error("The CSV file is empty.")
+        return None
+    except FileNotFoundError:
+        st.error("Could not access the Google Sheet. Please check the URL.")
+        return None
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        st.error(f"Error loading data: {str(e)}")
+        st.error("Please verify the Google Sheet URL and ensure it's publicly accessible.")
         return None
 
 # --- 3. Plotting Functions ---
