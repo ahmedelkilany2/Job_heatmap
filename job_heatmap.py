@@ -1,168 +1,58 @@
 import streamlit as st
 import pandas as pd
 import folium
-from folium.plugins import HeatMap
-from streamlit_folium import st_folium
+from streamlit_folium import folium_static
 from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
+from geopy.exc import GeocoderTimedOut
+from folium.plugins import HeatMap
 import time
+from streamlit_autorefresh import st_autorefresh
+import streamlit_analytics as sa
 
-# --- 1. Streamlit page configuration ---
-st.set_page_config(
-    page_title="Jora Job Analysis",
-    page_icon="📊",
-    layout="wide",
-)
+# Prevent Streamlit from sleeping
+sa.start_tracking()
 
-# Title and description
-st.title("Jora Job Scraping Analysis - Australia 📊")
-st.markdown("Interactive dashboard analyzing job postings data scraped from Jora website.")
+# Auto-refresh every 4 hours (14400 seconds)
+st_autorefresh(interval=14400 * 1000, key="refresh")
 
-# Australian state mappings
-STATE_MAPPINGS = {
-    'VIC': 'Victoria',
-    'NSW': 'New South Wales',
-    'QLD': 'Queensland',
-    'SA': 'South Australia',
-    'WA': 'Western Australia',
-    'TAS': 'Tasmania',
-    'NT': 'Northern Territory',
-    'ACT': 'Australian Capital Territory'
-}
+# Google Sheets URL (CSV export link)
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQub8XWScX6fHhlfMzgIbm_Uh6oFX8eVafOsz3RGKzM5jT_ZlwNBlxlmQFYgF4oUAA/pub?output=csv"
 
-# --- 2. Data Loading and Processing ---
-sheet_url = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/export?format=csv&gid=0"
-
-@st.cache_data
+# Load data
 def load_data():
-    """Loads data from Google Sheets CSV URL."""
+    df = pd.read_csv(GOOGLE_SHEET_URL)
+    return df
+
+def get_lat_lon(location):
+    geolocator = Nominatim(user_agent="job_locator")
     try:
-        df = pd.read_csv(sheet_url)
-        return df
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return None
+        if location.lower() == "vic":
+            location = "Victoria, Australia"
+        loc = geolocator.geocode(location, timeout=10)
+        if loc:
+            return loc.latitude, loc.longitude
+        else:
+            return None, None
+    except GeocoderTimedOut:
+        return None, None
 
-@st.cache_data
-def geocode_locations(locations):
-    """
-    Geocodes a list of locations to get their coordinates.
-    Handles Australian state abbreviations and adds proper context for better accuracy.
-    """
-    geolocator = Nominatim(user_agent="my_job_analysis_app")
-    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
-    
-    coordinates = {}
-    for loc in locations:
-        try:
-            # Process the location string
-            location_parts = loc.strip().split()
-            
-            # Handle state abbreviations
-            if location_parts[-1] in STATE_MAPPINGS:
-                state_full = STATE_MAPPINGS[location_parts[-1]]
-                city = ' '.join(location_parts[:-1])
-                location_str = f"{city}, {state_full}, Australia"
-            else:
-                location_str = f"{loc}, Australia"
+# Load data
+st.title("Job Location Heatmap")
+df = load_data()
 
-            # Try geocoding with formatted string
-            location = geocode(location_str)
-            
-            # If failed, try with just city and country
-            if not location and len(location_parts) > 1:
-                city = ' '.join(location_parts[:-1])
-                location = geocode(f"{city}, Australia")
-            
-            if location:
-                coordinates[loc] = (location.latitude, location.longitude)
-            else:
-                st.warning(f"Could not geocode location: {loc}")
-                # Fallback coordinates for Victorian locations if geocoding fails
-                if 'VIC' in loc:
-                    coordinates[loc] = (-37.8136, 144.9631)  # Melbourne coordinates as fallback
-                else:
-                    coordinates[loc] = None
-                    
-            time.sleep(1)  # Respect rate limits
-            
-        except Exception as e:
-            st.warning(f"Error geocoding {loc}: {str(e)}")
-            coordinates[loc] = None
-    
-    return coordinates
+# Check if 'Location' column exists
+if 'Location' not in df.columns:
+    st.error("No 'Location' column found in the dataset!")
+else:
+    df['Coordinates'] = df['Location'].apply(get_lat_lon)
+    df.dropna(subset=['Coordinates'], inplace=True)
+    df[['Latitude', 'Longitude']] = pd.DataFrame(df['Coordinates'].tolist(), index=df.index)
 
-def create_location_heatmap(df):
-    """Creates a heatmap of job locations."""
-    if df is None or 'location' not in df.columns:
-        st.error("Required location data not found in the dataset.")
-        return
+    # Create map
+    m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Centered in Victoria, Australia
+    HeatMap(df[['Latitude', 'Longitude']].values, radius=15).add_to(m)
     
-    # Get unique locations
-    unique_locations = df['location'].dropna().unique()
-    
-    # Show progress
-    with st.spinner('Geocoding locations... This may take a few minutes.'):
-        coordinates_dict = geocode_locations(unique_locations)
-    
-    # Create a list of coordinates with their counts
-    location_data = []
-    for loc, count in df['location'].value_counts().items():
-        if coordinates_dict.get(loc):
-            # Add the same coordinates multiple times based on job count
-            location_data.extend([coordinates_dict[loc]] * count)
-    
-    if not location_data:
-        st.error("No valid coordinates found for the locations.")
-        return
-    
-    # Create the map centered on Victoria, Australia
-    m = folium.Map(location=[-37.8136, 144.9631], zoom_start=7)
-    
-    # Add the heatmap layer
-    HeatMap(location_data, radius=15, blur=10).add_to(m)
-    
-    # Display the map
-    st_folium(m, height=600, width=None)
+    # Display map
+    folium_static(m)
 
-# --- 3. Main Dashboard Layout ---
-def main():
-    # Load the data
-    df = load_data()
-    
-    if df is not None:
-        # Display basic statistics
-        st.subheader("Dataset Overview")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Job Postings", len(df))
-        
-        with col2:
-            unique_locations = len(df['location'].unique())
-            st.metric("Unique Locations", unique_locations)
-        
-        with col3:
-            if 'category' in df.columns:
-                unique_categories = len(df['category'].unique())
-                st.metric("Job Categories", unique_categories)
-        
-        # Display the heatmap
-        st.subheader("Job Posting Locations Heatmap 🗺️")
-        create_location_heatmap(df)
-        
-        # Show location table
-        st.subheader("Location Distribution")
-        location_counts = df['location'].value_counts().reset_index()
-        location_counts.columns = ['Location', 'Number of Jobs']
-        st.dataframe(location_counts)
-        
-        # Optional: Show raw data
-        if st.checkbox("Show Raw Data"):
-            st.subheader("Raw Data")
-            st.dataframe(df)
-    else:
-        st.error("Failed to load data. Please check the Google Sheets URL and try again.")
-
-if __name__ == "__main__":
-    main()
+sa.stop_tracking()
