@@ -47,21 +47,21 @@ if df is not None:
         try:
             loc = geolocator.geocode(location, timeout=10, country_codes="au")
             if loc:
-                return pd.Series([loc.latitude, loc.longitude])
+                return loc.latitude, loc.longitude
         except GeocoderTimedOut:
             time.sleep(1)  # Wait and retry
-        return pd.Series([None, None])
+        return None, None  # Ensure two values are returned
 
     # Apply geocoding and expand into 'lat' & 'lon' columns
-    df[["lat", "lon"]] = df["location"].apply(geocode_location)
+    df[["lat", "lon"]] = df["location"].apply(lambda x: pd.Series(geocode_location(x)))
 
     # Remove failed geocodes
-    df = df.dropna(subset=["lat", "lon"])
+    df.dropna(subset=["lat", "lon"], inplace=True)
 
     # Display Key Stats
     total_locations = len(df)
     unique_locations = df["location"].nunique()
-    successfully_geocoded = len(df.dropna(subset=["lat", "lon"]))
+    successfully_geocoded = len(df)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("📍 Total Job Locations", total_locations)
