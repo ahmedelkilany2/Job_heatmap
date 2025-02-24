@@ -11,7 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 st_autorefresh(interval=14400 * 1000, key="refresh")
 
 # 📌 Google Sheets URL (CSV export link)
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQub8XWScX6fHhlfMzgIbm_Uh6oFX8eVafOsz3RGKzM5jT_ZlwNBlxlmQFYgF4oUAA/pub?output=csv"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
 
 # 🔄 Load Data
 @st.cache_data(ttl=14400)  # Cache data for 4 hours
