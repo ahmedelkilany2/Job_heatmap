@@ -7,45 +7,44 @@ from geopy.exc import GeocoderTimedOut
 from folium.plugins import HeatMap
 from streamlit_autorefresh import st_autorefresh
 
-# Auto-refresh every 4 hours (14400 seconds)
+# 🕒 Auto-refresh every 4 hours (14400 seconds)
 st_autorefresh(interval=14400 * 1000, key="refresh")
 
-# Google Sheets URL (CSV export link)
+# 📌 Google Sheets URL (CSV export link)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQub8XWScX6fHhlfMzgIbm_Uh6oFX8eVafOsz3RGKzM5jT_ZlwNBlxlmQFYgF4oUAA/pub?output=csv"
 
-# Load data
+# 🔄 Load Data
+@st.cache_data(ttl=14400)  # Cache data for 4 hours
 def load_data():
     df = pd.read_csv(GOOGLE_SHEET_URL)
     return df
 
+# 📍 Get Latitude & Longitude
+@st.cache_data
 def get_lat_lon(location):
     geolocator = Nominatim(user_agent="job_locator")
     try:
         if location.lower() == "vic":
             location = "Victoria, Australia"
         loc = geolocator.geocode(location, timeout=10)
-        if loc:
-            return loc.latitude, loc.longitude
-        else:
-            return None, None
+        return (loc.latitude, loc.longitude) if loc else (None, None)
     except GeocoderTimedOut:
-        return None, None
+        return (None, None)
 
-# Load data
-st.title("Job Location Heatmap")
+# 🎯 Load & Process Data
+st.title("🌍 Job Location Heatmap")
 df = load_data()
 
-# Check if 'Location' column exists
-if 'Location' not in df.columns:
-    st.error("No 'Location' column found in the dataset!")
+if "Location" not in df.columns:
+    st.error("⚠️ No 'Location' column found in the dataset!")
 else:
-    df['Coordinates'] = df['Location'].apply(get_lat_lon)
-    df.dropna(subset=['Coordinates'], inplace=True)
-    df[['Latitude', 'Longitude']] = pd.DataFrame(df['Coordinates'].tolist(), index=df.index)
+    df["Coordinates"] = df["Location"].apply(get_lat_lon)
+    df.dropna(subset=["Coordinates"], inplace=True)
+    df[["Latitude", "Longitude"]] = pd.DataFrame(df["Coordinates"].tolist(), index=df.index)
 
-    # Create map
+    # 🗺️ Create Heatmap
     m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Centered in Victoria, Australia
-    HeatMap(df[['Latitude', 'Longitude']].values, radius=15).add_to(m)
+    HeatMap(df[["Latitude", "Longitude"]].values, radius=15).add_to(m)
     
-    # Display map
+    # 📌 Display Map
     folium_static(m)
