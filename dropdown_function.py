@@ -18,8 +18,8 @@ st.title("Adzuna Job Scraping Analysis - Australia 📊")
 st.markdown("This is an interactive dashboard to analyze job postings data scraped from Adzuna website.")
 
 # --- 2. Data Loading ---
-# Modified Google Sheets CSV URL
-sheet_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/export?format=csv&gid=553613618"
+# Google Sheets CSV URL
+sheet_url = "https://docs.google.com/spreadsheets/d/1VTMPy-dvropKZANZeMJMxfuRmFrAYJ2YFC1kbLznT9Q/export?format=csv"
 
 # Cache
 @st.cache_data
@@ -32,22 +32,6 @@ def load_data():
         if 'latitude' not in df.columns or 'longitude' not in df.columns:
             st.error("Error: The Google Sheet must contain 'latitude' and 'longitude' columns.")
             return None
-
-        # Convert latitude and longitude to numeric, handling errors
-        df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-        df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-
-        # Remove rows with NaN values in latitude or longitude
-        df = df.dropna(subset=['latitude', 'longitude'])
-
-        if df.empty:
-            st.warning("No valid location data found.")
-            return None
-
-        return df
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return None
 
 # --- 3. Plotting Functions ---
 # --- Chart 1 ---
