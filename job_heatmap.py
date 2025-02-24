@@ -5,12 +5,10 @@ from streamlit_folium import folium_static
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 from folium.plugins import HeatMap
-import time
-import streamlit_analytics as sa
+from streamlit_autorefresh import st_autorefresh
 
-# Reload page every 4 hours (14400 seconds)
-time.sleep(14400)
-st.experimental_rerun()
+# Auto-refresh every 4 hours (14400 seconds)
+st_autorefresh(interval=14400 * 1000, key="refresh")
 
 # Google Sheets URL (CSV export link)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQub8XWScX6fHhlfMzgIbm_Uh6oFX8eVafOsz3RGKzM5jT_ZlwNBlxlmQFYgF4oUAA/pub?output=csv"
@@ -51,5 +49,3 @@ else:
     
     # Display map
     folium_static(m)
-
-sa.stop_tracking()
