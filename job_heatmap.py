@@ -2,15 +2,15 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import folium_static
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut
+from opencage.geocoder import OpenCageGeocode
 import time
 
-# Google Sheets URL (must be in CSV format)
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
+# ✅ OpenCage API Key (Replace with your own)
+OPENCAGE_API_KEY = "YOUR_OPENCAGE_API_KEY"
+geocoder = OpenCageGeocode(OPENCAGE_API_KEY)
 
-# Initialize geolocator
-geolocator = Nominatim(user_agent="job_heatmap")
+# ✅ Google Sheets URL (Must be in CSV format)
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
 
 def load_data():
     """Load job location data from Google Sheets."""
@@ -26,17 +26,18 @@ def load_data():
         return None
 
 def geocode_location(location):
-    """Convert location names to latitude & longitude, handling errors."""
+    """Convert location names to latitude & longitude using OpenCage."""
     try:
-        loc = geolocator.geocode(location, timeout=10)
-        if loc:
-            return loc.latitude, loc.longitude
-    except GeocoderTimedOut:
-        time.sleep(1)  # Retry after delay
+        result = geocoder.geocode(location)
+        if result:
+            return result[0]['geometry']['lat'], result[0]['geometry']['lng']
+    except Exception as e:
+        st.warning(f"⚠️ Geocoding failed for {location}: {e}")
+        time.sleep(1)  # Prevent rate-limiting
     return None, None
 
 def main():
-    """Main function for the Jora job heatmap dashboard."""
+    """Main function for Jora job heatmap dashboard."""
     st.subheader("📍 Jora Job Posting Location Heatmap")
 
     df = load_data()
