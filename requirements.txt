@@ -16,3 +16,4 @@ streamlit-autorefresh
 opencage
 numpy
 requests
+time
