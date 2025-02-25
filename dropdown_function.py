@@ -6,174 +6,7 @@ import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 
-
-# Title and description
-st.title("Adzuna Job Scraping Analysis - Australia 📊")
-st.markdown("This is an interactive dashboard to analyze job postings data scraped from Adzuna website.")
-
-# --- 2. Data Loading ---
-# Convert edit URL to export URL
-sheet_id = "154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k"
-gid = "553613618"
-sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
-
-@st.cache_data
-def load_data():
-    """Loads data from Google Sheets CSV URL."""
-    try:
-        # Load the data with more robust CSV reading parameters
-        df = pd.read_csv(
-            sheet_url,
-            on_bad_lines='warn',  # Don't fail on problematic lines
-            encoding='utf-8',     # Specify encoding
-            low_memory=False      # Handle large files better
-        )
-        
-        # First, show a preview of the DataFrame columns to help with debugging
-        st.sidebar.write("Available columns:", df.columns.tolist())
-        
-        # Rename day_of_week to Day to match the rest of the code
-        if 'day_of_week' in df.columns:
-            df = df.rename(columns={'day_of_week': 'Day'})
-        
-        # Clean up column names (remove any whitespace)
-        df.columns = df.columns.str.strip()
-        
-        # Validate required columns exist
-        required_columns = ['latitude', 'longitude', 'category', 'contract_type', 'contract_time', 'Day', 'salary_min', 'salary_max']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            st.error(f"Error: Missing required columns: {', '.join(missing_columns)}")
-            st.error("Please ensure your Google Sheet has all required columns.")
-            st.write("Expected columns:", required_columns)
-            st.write("Found columns:", df.columns.tolist())
-            return None
-            
-        # Convert latitude and longitude to numeric, handling errors
-        df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-        df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-        
-        # Remove rows with NaN values in latitude or longitude
-        df = df.dropna(subset=['latitude', 'longitude'])
-        
-        if df.empty:
-            st.warning("No valid location data found after cleaning.")
-            return None
-            
-        # Convert salary columns to numeric if they exist
-        if 'salary_min' in df.columns and 'salary_max' in df.columns:
-            df['salary_min'] = pd.to_numeric(df['salary_min'], errors='coerce')
-            df['salary_max'] = pd.to_numeric(df['salary_max'], errors='coerce')
-        
-        # Display data shape for debugging
-        st.sidebar.write(f"Data shape: {df.shape}")
-        
-        return df
-        
-    except pd.errors.EmptyDataError:
-        st.error("The CSV file is empty.")
-        return None
-    except FileNotFoundError:
-        st.error("Could not access the Google Sheet. Please check the URL and sharing settings.")
-        return None
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        st.error("Troubleshooting steps:")
-        st.error("1. Check if the sheet is published to web (File → Share → Publish to web)")
-        st.error("2. Verify sharing settings (Anyone with link → Viewer)")
-        st.error("3. Check for any merged cells or formatting issues in your sheet")
-        return None
-            
-        # Convert latitude and longitude to numeric, handling errors
-        df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-        df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-        
-        # Remove rows with NaN values in latitude or longitude
-        df = df.dropna(subset=['latitude', 'longitude'])
-        
-        if df.empty:
-            st.warning("No valid location data found after cleaning.")
-            return None
-            
-        # Convert salary columns to numeric if they exist
-        if 'salary_min' in df.columns and 'salary_max' in df.columns:
-            df['salary_min'] = pd.to_numeric(df['salary_min'], errors='coerce')
-            df['salary_max'] = pd.to_numeric(df['salary_max'], errors='coerce')
-        
-        return df
-        
-    except pd.errors.EmptyDataError:
-        st.error("The CSV file is empty.")
-        return None
-    except FileNotFoundError:
-        st.error("Could not access the Google Sheet. Please check the URL.")
-        return None
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        st.error("Please verify the Google Sheet URL and ensure it's publicly accessible.")
-        return None
-
-# --- 3. Plotting Functions ---
-# --- Chart 1 ---
-def plot_total_job_postings(df_full, df):
-    """Displays the total number of job postings as a metric and the percentage of filtered jobs."""
-    if df_full is None:
-        st.warning("Cannot display total job postings: Data loading failed.")
-        return
-
-    total_jobs_full = len(df_full)
-    total_jobs = len(df)
-    percentage_filtered = (total_jobs / total_jobs_full) * 100 if total_jobs_full > 0 else 0
-
-    st.metric(
-        label="Total Job Postings 💼",
-        value=f"{total_jobs} out of {total_jobs_full}",
-        delta=f"{percentage_filtered:.2f}%",
-    )
-
-# --- Chart 2 ---
-def plot_job_density_heatmap(df):
-    """Plots a heatmap using Folium."""
-    if df is None:
-        st.warning("Cannot plot heatmap: Data loading failed.")
-        return
-
-    if df.empty:
-        st.warning("No valid location data to plot heatmap.")
-        return
-
-    location_data = list(zip(df['latitude'], df['longitude']))
-
-    # Create a map centered on Australia
-    map_center = [-25.2744, 133.7751]
-    job_map = folium.Map(location=map_center, zoom_start=4)
-
-    # Add HeatMap
-    HeatMap(location_data, radius=15, blur=10).add_to(job_map)
-
-    # Display the map using streamlit-folium
-    st_folium(job_map, height=600, width=1200)
-
-# --- Chart 3 ---
-def plot_job_postings_by_categories(df):
-    """Plots the top 10 job categories in descending order."""
-    if df is None:
-        st.warning("Cannot plot category data: Data loading failed.")
-        return
-
-    category_counts = df['category'].value_counts().reset_index()
-    category_counts.columns = ['category', 'count']
-
-    fig = px.bar(category_counts, x='count', y='category',
-                 labels={'count': 'Number of Jobs', 'category': 'Category'},
-                 color='category')
-
-    fig.update_layout(yaxis={'categoryorder':'total ascending'}, height=1200, showlegend=False)
-
-    st.plotly_chart(fig, use_container_width=True)
-
-# --- Chart 4 & 5 ---
+# Helper functions that don't use Streamlit widgets
 def make_donut(input_response, input_text, input_color):
     """Creates donut chart function for Charts 4 and 5"""
     if input_color == 'blue':
@@ -216,11 +49,120 @@ def make_donut(input_response, input_text, input_color):
     ).properties(width=130, height=130)
     return plot_bg + plot + text
 
-def plot_contract_time_donuts(df):
-    """Plots separate donut charts for Full-Time and Part-Time contract times."""
+@st.cache_data
+def load_data():
+    """Loads data from Google Sheets CSV URL."""
+    # Convert edit URL to export URL
+    sheet_id = "154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k"
+    gid = "553613618"
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+    
+    try:
+        # Load the data with more robust CSV reading parameters
+        df = pd.read_csv(
+            sheet_url,
+            on_bad_lines='warn',  # Don't fail on problematic lines
+            encoding='utf-8',     # Specify encoding
+            low_memory=False      # Handle large files better
+        )
+        
+        # Rename day_of_week to Day to match the rest of the code
+        if 'day_of_week' in df.columns:
+            df = df.rename(columns={'day_of_week': 'Day'})
+        
+        # Clean up column names (remove any whitespace)
+        df.columns = df.columns.str.strip()
+        
+        # Validate required columns exist
+        required_columns = ['latitude', 'longitude', 'category', 'contract_type', 'contract_time', 'Day', 'salary_min', 'salary_max']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            return None
+            
+        # Convert latitude and longitude to numeric, handling errors
+        df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
+        df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+        
+        # Remove rows with NaN values in latitude or longitude
+        df = df.dropna(subset=['latitude', 'longitude'])
+        
+        if df.empty:
+            return None
+            
+        # Convert salary columns to numeric if they exist
+        if 'salary_min' in df.columns and 'salary_max' in df.columns:
+            df['salary_min'] = pd.to_numeric(df['salary_min'], errors='coerce')
+            df['salary_max'] = pd.to_numeric(df['salary_max'], errors='coerce')
+        
+        return df
+        
+    except Exception:
+        return None
+
+def filter_dataframe(df, contract_type, contract_time, category):
+    """Filters the DataFrame based on selected options."""
+    df_filtered = df.copy()
+
+    if 'All' not in category:
+        df_filtered = df_filtered[df_filtered['category'].isin(category)]
+
+    if 'All' not in contract_type:
+        df_filtered = df_filtered[df_filtered['contract_type'].isin(contract_type)]
+
+    if 'All' not in contract_time:
+        df_filtered = df_filtered[df_filtered['contract_time'].isin(contract_time)]
+
+    return df_filtered
+
+# Plotting functions that don't create Streamlit elements
+def plot_total_job_postings(df_full, df):
+    """Calculates total jobs for displaying as metric."""
+    if df_full is None:
+        return None, None, None
+
+    total_jobs_full = len(df_full)
+    total_jobs = len(df)
+    percentage_filtered = (total_jobs / total_jobs_full) * 100 if total_jobs_full > 0 else 0
+    
+    return total_jobs, total_jobs_full, percentage_filtered
+
+def create_job_density_heatmap(df):
+    """Creates a heatmap using Folium without displaying it."""
+    if df is None or df.empty:
+        return None
+
+    location_data = list(zip(df['latitude'], df['longitude']))
+
+    # Create a map centered on Australia
+    map_center = [-25.2744, 133.7751]
+    job_map = folium.Map(location=map_center, zoom_start=4)
+
+    # Add HeatMap
+    HeatMap(location_data, radius=15, blur=10).add_to(job_map)
+    
+    return job_map
+
+def create_job_postings_by_categories_chart(df):
+    """Creates the category bar chart without displaying it."""
     if df is None:
-        st.warning("Cannot plot contract time donuts: Data loading failed.")
-        return
+        return None
+
+    category_counts = df['category'].value_counts().reset_index()
+    category_counts.columns = ['category', 'count']
+
+    fig = px.bar(category_counts, x='count', y='category',
+                 labels={'count': 'Number of Jobs', 'category': 'Category'},
+                 color='category')
+
+    fig.update_layout(yaxis={'categoryorder':'total ascending'}, height=1200, showlegend=False)
+    
+    return fig
+
+def create_contract_time_donuts(df):
+    """Creates donut charts for contract times without displaying them."""
+    if df is None:
+        return None, None
 
     full_time_count = len(df[df['contract_time'] == 'full_time'])
     total_count = len(df)
@@ -231,20 +173,13 @@ def plot_contract_time_donuts(df):
 
     full_time_donut = make_donut(round(full_time_percentage,1), "Full-Time", "blue")
     part_time_donut = make_donut(round(part_time_percentage,1), "Part-Time", "red")
+    
+    return full_time_donut, part_time_donut
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Full-Time")
-        st.altair_chart(full_time_donut, use_container_width=True)
-    with col2:
-        st.subheader("Part-Time")
-        st.altair_chart(part_time_donut, use_container_width=True)
-
-def plot_contract_type_donuts(df):
-    """Plots separate donut charts for Contract and Permanent contract types."""
+def create_contract_type_donuts(df):
+    """Creates donut charts for contract types without displaying them."""
     if df is None:
-        st.warning("Cannot plot contract type donuts: Data loading failed.")
-        return
+        return None, None
 
     contract_count = len(df[df['contract_type'] == 'contract'])
     total_count = len(df)
@@ -255,21 +190,13 @@ def plot_contract_type_donuts(df):
 
     contract_donut = make_donut(round(contract_percentage,1), "Contract", "blue")
     permanent_donut = make_donut(round(permanent_percentage,1), "Permanent", "red")
+    
+    return contract_donut, permanent_donut
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Contract")
-        st.altair_chart(contract_donut, use_container_width=True)
-    with col2:
-        st.subheader("Permanent")
-        st.altair_chart(permanent_donut, use_container_width=True)
-
-# --- Chart 6 ---
-def plot_total_jobs_by_day(df):
-    """Plots the total number of job postings by day of the week."""
+def create_total_jobs_by_day_chart(df):
+    """Creates the jobs by day chart without displaying it."""
     if df is None:
-        st.warning("Cannot plot total jobs by day: Data loading failed.")
-        return
+        return None
 
     day_counts = df['Day'].value_counts().reset_index()
     day_counts.columns = ['Day', 'count']
@@ -288,15 +215,13 @@ def plot_total_jobs_by_day(df):
     )
 
     fig.update_layout(showlegend=False)
+    
+    return fig
 
-    st.plotly_chart(fig, use_container_width=True)
-
-# --- Chart 7 ---
-def plot_salary_range_by_category(df):
-    """Plots the salary range by top 10 job categories using a box plot."""
+def create_salary_range_by_category_chart(df):
+    """Creates the salary range chart without displaying it."""
     if df is None:
-        st.warning("Cannot plot salary range by category: Data loading failed.")
-        return
+        return None
 
     df_cleaned = df.dropna(subset=['salary_min', 'salary_max', 'category'])
 
@@ -304,8 +229,7 @@ def plot_salary_range_by_category(df):
         df_cleaned['salary_min'] = pd.to_numeric(df_cleaned['salary_min'])
         df_cleaned['salary_max'] = pd.to_numeric(df_cleaned['salary_max'])
     except ValueError:
-        st.error("Could not convert salary columns to numeric. Check your data.")
-        return
+        return None
 
     df_cleaned['average_salary'] = (df_cleaned['salary_min'] + df_cleaned['salary_max']) / 2
 
@@ -322,87 +246,128 @@ def plot_salary_range_by_category(df):
     ).properties(
         height=500
     )
+    
+    return chart
 
-    st.altair_chart(chart, use_container_width=True)
+# Main function that will be called by the main app
+def main():
+    """Main function to run the Adzuna dashboard."""
+    # Title and description
+    st.title("Adzuna Job Scraping Analysis - Australia 📊")
+    st.markdown("This is an interactive dashboard to analyze job postings data scraped from Adzuna website.")
+    
+    # Load data
+    df_full = load_data()
+    
+    if df_full is not None:
+        # Show available columns in sidebar for debugging
+        st.sidebar.write("Available columns:", df_full.columns.tolist())
+        st.sidebar.write(f"Data shape: {df_full.shape}")
+        
+        # Creating dropdown filtering sidebar
+        st.sidebar.header("Filters")
 
-# --- 4. Main App ---
-df_full = load_data()
+        try:
+            category_options = df_full['category'].unique().tolist()
+            contract_type_options = df_full['contract_type'].unique().tolist()
+            contract_time_options = df_full['contract_time'].unique().tolist()
+        except KeyError as e:
+            st.error(f"Error: Column '{e}' not found in DataFrame. Check your Google Sheet column names.")
+            return
 
-if df_full is not None:
-    # --- Creating dropdown filtering sidebar ---
-    st.sidebar.header("Filters")
+        category_options = ['All'] + category_options
+        contract_type_options = ['All'] + contract_type_options
+        contract_time_options = ['All'] + contract_time_options
 
-    try:
-        category_options = df_full['category'].unique().tolist()
-        contract_type_options = df_full['contract_type'].unique().tolist()
-        contract_time_options = df_full['contract_time'].unique().tolist()
-    except KeyError as e:
-        st.error(f"Error: Column '{e}' not found in DataFrame. Check your Google Sheet column names.")
-        st.stop()
+        category_filter = st.sidebar.multiselect(
+            "Category", options=category_options, default=['All']
+        )
 
-    category_options = ['All'] + category_options
-    contract_type_options = ['All'] + contract_type_options
-    contract_time_options = ['All'] + contract_time_options
+        contract_type_filter = st.sidebar.multiselect(
+            "Contract Type", options=contract_type_options, default=['All']
+        )
+        
+        contract_time_filter = st.sidebar.multiselect(
+            "Contract Time", options=contract_time_options, default=['All']
+        )
 
-    category_filter = st.sidebar.multiselect(
-        "Category", options=category_options, default=['All']
-    )
+        # Apply filters
+        filtered_df = filter_dataframe(df_full, contract_type_filter, contract_time_filter, category_filter)
 
-    contract_type_filter = st.sidebar.multiselect(
-        "Contract Type", options=contract_type_options, default=['All']
-    )
-    contract_time_filter = st.sidebar.multiselect(
-        "Contract Time", options=contract_time_options, default=['All']
-    )
+        if not filtered_df.empty:
+            # Main Area Dashboard Layout
+            col1, col2, col3 = st.columns([2, 4, 2])
 
-    # --- Data Filtering ---
-    def filter_dataframe(df, contract_type, contract_time, category):
-        """Filters the DataFrame based on selected options."""
-        df_filtered = df.copy()
+            with col1:
+                st.subheader("Total Job Postings 💼")
+                total_jobs, total_jobs_full, percentage_filtered = plot_total_job_postings(df_full, filtered_df)
+                st.metric(
+                    label="Total Job Postings 💼",
+                    value=f"{total_jobs} out of {total_jobs_full}",
+                    delta=f"{percentage_filtered:.2f}%",
+                )
+                
+                st.subheader("Total Job Postings by day")
+                day_chart = create_total_jobs_by_day_chart(filtered_df)
+                if day_chart is not None:
+                    st.plotly_chart(day_chart, use_container_width=True)
+                else:
+                    st.warning("Cannot plot total jobs by day: Data loading failed.")
+                
+                st.subheader("Contract Time")
+                full_time_donut, part_time_donut = create_contract_time_donuts(filtered_df)
+                if full_time_donut is not None and part_time_donut is not None:
+                    col1a, col1b = st.columns(2)
+                    with col1a:
+                        st.subheader("Full-Time")
+                        st.altair_chart(full_time_donut, use_container_width=True)
+                    with col1b:
+                        st.subheader("Part-Time")
+                        st.altair_chart(part_time_donut, use_container_width=True)
+                else:
+                    st.warning("Cannot plot contract time donuts: Data loading failed.")
+                
+                st.subheader("Contract Type")
+                contract_donut, permanent_donut = create_contract_type_donuts(filtered_df)
+                if contract_donut is not None and permanent_donut is not None:
+                    col1c, col1d = st.columns(2)
+                    with col1c:
+                        st.subheader("Contract")
+                        st.altair_chart(contract_donut, use_container_width=True)
+                    with col1d:
+                        st.subheader("Permanent")
+                        st.altair_chart(permanent_donut, use_container_width=True)
+                else:
+                    st.warning("Cannot plot contract type donuts: Data loading failed.")
 
-        if 'All' not in category:
-            df_filtered = df_filtered[df_filtered['category'].isin(category)]
+            with col2:
+                st.subheader("Job Posting Density Heatmap 🔍") 
+                job_map = create_job_density_heatmap(filtered_df)
+                if job_map is not None:
+                    st_folium(job_map, height=600, width=1200)
+                else:
+                    st.warning("Cannot plot heatmap: No valid location data.")
+                
+                st.subheader("Top 10 Salary and its Range")
+                salary_chart = create_salary_range_by_category_chart(filtered_df)
+                if salary_chart is not None:
+                    st.altair_chart(salary_chart, use_container_width=True)
+                else:
+                    st.warning("Cannot plot salary range: Data issue.")
 
-        if 'All' not in contract_type:
-            df_filtered = df_filtered[df_filtered['contract_type'].isin(contract_type)]
+            with col3:
+                st.subheader("Total Job Postings Job Categories")
+                category_chart = create_job_postings_by_categories_chart(filtered_df)
+                if category_chart is not None:
+                    st.plotly_chart(category_chart, use_container_width=True)
+                else:
+                    st.warning("Cannot plot category data: Data loading failed.")
 
-        if 'All' not in contract_time:
-            df_filtered = df_filtered[df_filtered['contract_time'].isin(contract_time)]
-
-        return df_filtered
-
-    filtered_df = filter_dataframe(df_full, contract_type_filter, contract_time_filter, category_filter)
-
-    if not filtered_df.empty:
-        # --- Main Area Dashboard Layout ---
-        col1, col2, col3 = st.columns([2, 4, 2])
-
-        with col1:
-            st.subheader("Total Job Postings 💼")
-            plot_total_job_postings(df_full, filtered_df)
-            st.subheader("Total Job Postings by day")
-            plot_total_jobs_by_day(filtered_df)
-            st.subheader("Contract Time")
-            plot_contract_time_donuts(filtered_df)
-            st.subheader("Contract Type")
-            plot_contract_type_donuts(filtered_df)
-
-        with col2:
-            st.subheader("Job Posting Density Heatmap 🔍")  
-            plot_job_density_heatmap(filtered_df)
-            st.subheader("Top 10 Salary and its Range")
-            plot_salary_range_by_category(filtered_df)
-
-        with col3:
-            st.subheader("Total Job Postings Job Categories")
-            plot_job_postings_by_categories(filtered_df)
-
-        # Show raw data if checkbox is selected
-        if st.checkbox("Show Raw Data"):
-            st.subheader("Raw Data")
-            st.dataframe(filtered_df)
+            # Show raw data if checkbox is selected
+            if st.checkbox("Show Raw Data"):
+                st.subheader("Raw Data")
+                st.dataframe(filtered_df)
+        else:
+            st.warning("No data matches your selection. Change the filters!")
     else:
-        st.warning("No data matches your selection. Change the filters!")
-
-else:
-    st.warning("Data loading failed. Please check the credentials file path and Google Sheet.")
+        st.error("Data loading failed. Please check the credentials file path and Google Sheet.")
