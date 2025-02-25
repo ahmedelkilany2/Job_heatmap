@@ -13,4 +13,6 @@ plotly
 requests
 beautifulsoup4
 streamlit-autorefresh
-googlemaps
+opencage
+numpy
+requests
