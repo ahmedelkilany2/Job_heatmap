@@ -3,7 +3,6 @@ import importlib
 
 # ✅ Ensure this is the FIRST Streamlit command
 st.set_page_config(page_title="Job Analysis Dashboards", layout="wide")
-
 st.title("Job Market Analysis Dashboards")
 
 # Create a radio button to select the dashboard
@@ -20,13 +19,20 @@ modules = {
 
 module_name = modules[dashboard_selection]
 
-# ✅ Use caching to prevent unnecessary reloading
-@st.cache_resource
-def load_module(module_name):
-    return importlib.import_module(module_name)
-
+# Import the selected module - do NOT cache this!
 try:
-    module = load_module(module_name)  # ✅ Import dynamically
-    st.success(f"Loaded {module_name} successfully!")
+    module = importlib.import_module(module_name)
+    
+    # Now call the module's main function
+    if hasattr(module, 'main'):
+        module.main()
+    else:
+        st.error(f"The {module_name} module doesn't have a main() function.")
+        st.info("Each module must have a main() function that contains all the Streamlit UI code.")
 except Exception as e:
-    st.error(f"Failed to load {module_name}: {e}")
+    st.error(f"Failed to load or run {module_name}: {str(e)}")
+    st.code(f"Error details: {e}")
+    
+    # More detailed error handling for debugging
+    import traceback
+    st.code(traceback.format_exc())
