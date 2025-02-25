@@ -2,74 +2,73 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import folium_static
-from opencage.geocoder import OpenCageGeocode
+from geopy.geocoders import Photon  # More stable geocoding service
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import time
 
-# ✅ OpenCage API Key (Replace with your own)
-OPENCAGE_API_KEY = "YOUR_OPENCAGE_API_KEY"
-geocoder = OpenCageGeocode(OPENCAGE_API_KEY)
+# Set up Photon geocoder (alternative to Nominatim)
+geolocator = Photon(user_agent="vic_job_analysis")
 
-# ✅ Google Sheets URL (Must be in CSV format)
+# Google Sheets URL (Make sure it's a public CSV link)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
 
+@st.cache_data(ttl=14400)  # Cache data for 4 hours
 def load_data():
     """Load job location data from Google Sheets."""
     try:
         df = pd.read_csv(GOOGLE_SHEET_URL)
         df.columns = df.columns.str.strip().str.lower()  # Normalize column names
         if "location" not in df.columns:
-            st.error("⚠️ 'location' column is missing in the dataset!")
+            st.error("⚠️ 'location' column missing in the dataset!")
             return None
-        return df.dropna(subset=["location"])  # Remove empty locations
+        return df
     except Exception as e:
-        st.error(f"⚠️ Error loading data: {e}")
+        st.error(f"⚠️ Failed to load data: {str(e)}")
         return None
 
+@st.cache_data(ttl=14400)  # Cache geocoded results
 def geocode_location(location):
-    """Convert location names to latitude & longitude using OpenCage."""
+    """Convert location names to latitude & longitude using Photon."""
     try:
-        result = geocoder.geocode(location)
-        if result:
-            return result[0]['geometry']['lat'], result[0]['geometry']['lng']
+        full_location = f"{location}, Victoria, Australia"  # Ensure correct region
+        location_data = geolocator.geocode(full_location, timeout=10)
+        if location_data:
+            return location_data.latitude, location_data.longitude
+    except (GeocoderTimedOut, GeocoderServiceError):
+        st.warning(f"⚠️ Geocoding timed out for {location}. Retrying in 2 seconds...")
+        time.sleep(2)
+        return geocode_location(location)
     except Exception as e:
-        st.warning(f"⚠️ Geocoding failed for {location}: {e}")
-        time.sleep(1)  # Prevent rate-limiting
+        st.warning(f"⚠️ Geocoding failed for {location}: {str(e)}")
     return None, None
 
 def main():
-    """Main function for Jora job heatmap dashboard."""
-    st.subheader("📍 Jora Job Posting Location Heatmap")
+    """Main function to run the job heatmap dashboard."""
+    st.subheader("📍 Job Posting Location Analysis (Victoria)")
 
+    # Load data
     df = load_data()
-    if df is None:
-        return
 
-    st.success("✅ Data Loaded Successfully!")
-
-    # Add button to trigger geocoding (avoids unnecessary refresh)
-    if st.button("🔍 Process Locations"):
-        with st.spinner("🔍 Geocoding locations... This may take some time."):
-            df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
+    if df is not None:
+        st.success("✅ Data Loaded Successfully!")
         
-        # Remove missing coordinates
-        df = df.dropna(subset=["lat", "lon"])
+        # Apply geocoding with caching
+        df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
+        df = df.dropna(subset=["lat", "lon"])  # Remove rows with missing coordinates
 
-        # Show summary
-        total_locations = len(df)
-        unique_locations = df["location"].nunique()
-        st.success(f"✅ Geocoded {unique_locations} unique locations from {total_locations} job postings!")
-
-        # Create map centered on Victoria, Australia
+        # Create Map
         st.subheader("📍 Job Posting Density Heatmap")
-        m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)
+        m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Default: Melbourne, VIC
 
-        # Add Heatmap (including duplicate locations for better intensity)
+        # Add Heatmap
         from folium.plugins import HeatMap
         heat_data = df[["lat", "lon"]].values.tolist()
         HeatMap(heat_data, radius=15, blur=10).add_to(m)
 
-        # Display map
+        # Display Map
         folium_static(m)
+    else:
+        st.error("⚠️ No data available! Please check your Google Sheet connection.")
 
 if __name__ == "__main__":
     main()
