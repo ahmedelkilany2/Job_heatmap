@@ -12,7 +12,6 @@ GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6o
 # Initialize geolocator
 geolocator = Nominatim(user_agent="job_heatmap")
 
-@st.cache_data(ttl=14400)  # Cache data for 4 hours
 def load_data():
     """Load job location data from Google Sheets."""
     try:
@@ -26,7 +25,6 @@ def load_data():
         st.error(f"⚠️ Error loading data: {e}")
         return None
 
-@st.cache_data(ttl=14400)  # Cache geocoded results
 def geocode_location(location):
     """Convert location names to latitude & longitude, handling errors."""
     try:
@@ -47,29 +45,30 @@ def main():
 
     st.success("✅ Data Loaded Successfully!")
 
-    # Apply geocoding to all locations
-    with st.spinner("🔍 Geocoding locations... This may take some time."):
-        df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
+    # Add button to trigger geocoding (avoids unnecessary refresh)
+    if st.button("🔍 Process Locations"):
+        with st.spinner("🔍 Geocoding locations... This may take some time."):
+            df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
+        
+        # Remove missing coordinates
+        df = df.dropna(subset=["lat", "lon"])
 
-    # Remove missing coordinates
-    df = df.dropna(subset=["lat", "lon"])
+        # Show summary
+        total_locations = len(df)
+        unique_locations = df["location"].nunique()
+        st.success(f"✅ Geocoded {unique_locations} unique locations from {total_locations} job postings!")
 
-    # Show summary
-    total_locations = len(df)
-    unique_locations = df["location"].nunique()
-    st.success(f"✅ Geocoded {unique_locations} unique locations from {total_locations} job postings!")
+        # Create map centered on Victoria, Australia
+        st.subheader("📍 Job Posting Density Heatmap")
+        m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)
 
-    # Create map centered on Victoria, Australia
-    st.subheader("📍 Job Posting Density Heatmap")
-    m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)
+        # Add Heatmap (including duplicate locations for better intensity)
+        from folium.plugins import HeatMap
+        heat_data = df[["lat", "lon"]].values.tolist()
+        HeatMap(heat_data, radius=15, blur=10).add_to(m)
 
-    # Add Heatmap (including duplicate locations for better intensity)
-    from folium.plugins import HeatMap
-    heat_data = df[["lat", "lon"]].values.tolist()
-    HeatMap(heat_data, radius=15, blur=10).add_to(m)
-
-    # Display map
-    folium_static(m)
+        # Display map
+        folium_static(m)
 
 if __name__ == "__main__":
     main()
