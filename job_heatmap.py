@@ -2,24 +2,17 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import folium_static
-import googlemaps
-import os
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut
+import time
 
 # Google Sheets URL (must be in CSV format)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
 
-# Google Maps API Key (Replace with your own key)
-API_KEY = "YOUR_GOOGLE_MAPS_API_KEY"  # Replace with your API key
-if API_KEY == "YOUR_GOOGLE_MAPS_API_KEY":
-    st.error("⚠️ Please set your Google Maps API Key!")
-    st.stop()
+# Initialize geolocator
+geolocator = Nominatim(user_agent="job_heatmap")
 
-gmaps = googlemaps.Client(key=API_KEY)
-
-# File to store cached geocoded locations
-CACHE_FILE = "geocoded_locations.csv"
-
-@st.cache_data(ttl=14400)  # Cache for 4 hours
+@st.cache_data(ttl=14400)  # Cache data for 4 hours
 def load_data():
     """Load job location data from Google Sheets."""
     try:
@@ -33,65 +26,44 @@ def load_data():
         st.error(f"⚠️ Error loading data: {e}")
         return None
 
-def load_cached_geocodes():
-    """Load cached geocoded locations."""
-    if os.path.exists(CACHE_FILE):
-        return pd.read_csv(CACHE_FILE).set_index("location").to_dict(orient="index")
-    return {}
-
-def save_cached_geocodes(cache):
-    """Save geocoded locations."""
-    pd.DataFrame.from_dict(cache, orient="index").reset_index().rename(
-        columns={"index": "location"}
-    ).to_csv(CACHE_FILE, index=False)
-
-def geocode_location(location, cache):
-    """Convert location names to latitude & longitude using Google Maps API."""
-    if location in cache:
-        return cache[location]["lat"], cache[location]["lon"]
-
+@st.cache_data(ttl=14400)  # Cache geocoded results
+def geocode_location(location):
+    """Convert location names to latitude & longitude, handling errors."""
     try:
-        geocode_result = gmaps.geocode(location)
-        if geocode_result:
-            lat = geocode_result[0]["geometry"]["location"]["lat"]
-            lon = geocode_result[0]["geometry"]["location"]["lng"]
-            cache[location] = {"lat": lat, "lon": lon}  # Store in cache
-            return lat, lon
-    except Exception as e:
-        st.warning(f"⚠️ Geocoding failed for {location}: {e}")
-        return None, None
-
+        loc = geolocator.geocode(location, timeout=10)
+        if loc:
+            return loc.latitude, loc.longitude
+    except GeocoderTimedOut:
+        time.sleep(1)  # Retry after delay
     return None, None
 
 def main():
-    """Main function for the job location heatmap."""
+    """Main function for the Jora job heatmap dashboard."""
     st.subheader("📍 Jora Job Posting Location Heatmap")
 
     df = load_data()
     if df is None:
         return
 
-    cached_geocodes = load_cached_geocodes()
+    st.success("✅ Data Loaded Successfully!")
 
-    # Geocode all locations
-    st.info("🔍 Geocoding job locations... This may take a few seconds.")
-    df["lat"], df["lon"] = zip(*df["location"].apply(lambda loc: geocode_location(loc, cached_geocodes)))
+    # Apply geocoding to all locations
+    with st.spinner("🔍 Geocoding locations... This may take some time."):
+        df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
 
-    # Save updated geocodes
-    save_cached_geocodes(cached_geocodes)
-
-    # Remove invalid coordinates
+    # Remove missing coordinates
     df = df.dropna(subset=["lat", "lon"])
 
+    # Show summary
     total_locations = len(df)
     unique_locations = df["location"].nunique()
-    st.success(f"✅ Geocoded {unique_locations} unique locations out of {total_locations} job postings!")
+    st.success(f"✅ Geocoded {unique_locations} unique locations from {total_locations} job postings!")
 
-    # Create map
+    # Create map centered on Victoria, Australia
     st.subheader("📍 Job Posting Density Heatmap")
-    m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Default to Victoria, Australia
+    m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)
 
-    # Add heatmap layer
+    # Add Heatmap (including duplicate locations for better intensity)
     from folium.plugins import HeatMap
     heat_data = df[["lat", "lon"]].values.tolist()
     HeatMap(heat_data, radius=15, blur=10).add_to(m)
