@@ -2,17 +2,21 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import folium_static
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut
-from concurrent.futures import ThreadPoolExecutor
+import googlemaps
 import time
-from folium.plugins import HeatMap
+import os
 
 # Google Sheets URL (must be in CSV format)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1iFZ71DNkAtlJL_HsHG6oT98zG4zhE6RrT2bbIBVitUA/gviz/tq?tqx=out:csv"
 
-# Cache Data (4 hours)
-@st.cache_data(ttl=14400)
+# Google Maps API Key (Replace with your own key)
+API_KEY = "YOUR_GOOGLE_MAPS_API_KEY"
+gmaps = googlemaps.Client(key=API_KEY)
+
+# File to store cached geocoded locations
+CACHE_FILE = "geocoded_locations.csv"
+
+@st.cache_data(ttl=14400)  # Cache data for 4 hours (14400 seconds)
 def load_data():
     """Load job location data from Google Sheets."""
     try:
@@ -24,76 +28,74 @@ def load_data():
     except Exception as e:
         return None
 
-# Cache Geocoding Results
-@st.cache_data(ttl=14400)
-def geocode_location(location):
-    """Convert location names to latitude & longitude."""
-    geolocator = Nominatim(user_agent="job_heatmap")
+def load_cached_geocodes():
+    """Load cached geocoded locations from CSV file."""
+    if os.path.exists(CACHE_FILE):
+        return pd.read_csv(CACHE_FILE).set_index("location").to_dict(orient="index")
+    return {}
+
+def save_cached_geocodes(cache):
+    """Save geocoded locations to a CSV file."""
+    pd.DataFrame.from_dict(cache, orient="index").reset_index().rename(columns={"index": "location"}).to_csv(CACHE_FILE, index=False)
+
+def geocode_location(location, cache):
+    """Convert location names to latitude & longitude using Google Maps API."""
+    if location in cache:  # Use cached result if available
+        return cache[location]["lat"], cache[location]["lon"]
+
     try:
-        loc = geolocator.geocode(location, timeout=10)
-        if loc:
-            return (loc.latitude, loc.longitude)
-    except GeocoderTimedOut:
-        time.sleep(1)  # Retry if timeout
-    return (None, None)
+        geocode_result = gmaps.geocode(location)
+        if geocode_result:
+            lat = geocode_result[0]["geometry"]["location"]["lat"]
+            lon = geocode_result[0]["geometry"]["location"]["lng"]
+            cache[location] = {"lat": lat, "lon": lon}  # Store in cache
+            return lat, lon
+    except Exception:
+        return None, None
 
-def batch_geocode(locations):
-    """Geocode multiple locations in parallel."""
-    unique_locations = list(set(locations))  # Remove exact duplicates to optimize calls
-    geocoded_results = {}
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        results = executor.map(geocode_location, unique_locations)
-
-    for loc, coords in zip(unique_locations, results):
-        geocoded_results[loc] = coords
-
-    return geocoded_results
+    return None, None
 
 def main():
-    """Main function to run the job heatmap dashboard."""
-    st.title("Jora Job Posting Location Analysis")
-    
+    """Main function to run the Jora job heatmap dashboard."""
+    st.subheader("📍 Jora Job Posting Location Heatmap")
+
     # Load data
     df = load_data()
-    
-    if df is not None:
-        st.success("✅ Data Loaded Successfully!")
-        
-        # Remove empty locations
-        df = df.dropna(subset=["location"])
-        total_locations = len(df)
-
-        # Batch Geocode Locations
-        st.subheader("🔄 Geocoding Locations... Please wait.")
-        geocoded_dict = batch_geocode(df["location"])
-        
-        # Map geocoded results back to DataFrame
-        df["lat"], df["lon"] = zip(*df["location"].map(lambda x: geocoded_dict.get(x, (None, None))))
-        
-        # Remove rows with missing coordinates
-        df = df.dropna(subset=["lat", "lon"])
-        success_count = len(df)
-        
-        # Show Summary
-        st.subheader("📊 Geocoding Summary")
-        st.write(f"✅ Successfully geocoded **{success_count}** out of **{total_locations}** locations.")
-        
-        # Create Map
-        st.subheader("📍 Job Posting Density Heatmap")
-        m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Default: Victoria, Australia
-        
-        # Include Duplicates by Weighting Heatmap
-        location_counts = df.groupby(["lat", "lon"]).size().reset_index(name="count")
-        heat_data = location_counts[["lat", "lon", "count"]].values.tolist()
-        
-        # Add Heatmap
-        HeatMap(heat_data, radius=15, blur=10).add_to(m)
-        
-        # Display Map
-        folium_static(m)
-    else:
+    if df is None:
         st.error("⚠️ No data available! Please check your Google Sheet connection.")
+        return
+
+    # Load cached geocoded locations
+    cached_geocodes = load_cached_geocodes()
+
+    # Geocode all locations
+    st.info("🔍 Geocoding job locations... This may take a few seconds.")
+    df["lat"], df["lon"] = zip(*df["location"].apply(lambda loc: geocode_location(loc, cached_geocodes)))
+
+    # Save updated geocodes to cache
+    save_cached_geocodes(cached_geocodes)
+
+    # Drop missing coordinates
+    df = df.dropna(subset=["lat", "lon"])
+
+    # Count unique geocoded locations
+    total_locations = len(df)
+    unique_locations = df["location"].nunique()
+    
+    st.success(f"✅ Geocoded {unique_locations} unique locations out of {total_locations} job postings!")
+
+    # Create map
+    st.subheader("📍 Job Posting Density Heatmap")
+    m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Default to Victoria, Australia
+
+    # Add heatmap layer
+    from folium.plugins import HeatMap
+    heat_data = df[["lat", "lon"]].values.tolist()
+    HeatMap(heat_data, radius=15, blur=10).add_to(m)
+
+    # Display map
+    folium_static(m)
 
 if __name__ == "__main__":
     main()
+
