@@ -16,3 +16,5 @@ streamlit-autorefresh
 opencage
 numpy
 requests
+geocoder
+python-dotenv
