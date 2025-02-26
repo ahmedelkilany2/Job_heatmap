@@ -13,8 +13,8 @@ import re
 load_dotenv()
 
 # Set up the Streamlit app
-st.set_page_config(page_title="Australian Job Locations Heatmap", layout="wide")
-st.title("Australian Job Locations Heatmap")
+st.set_page_config(page_title="Victorian Suburbs Job Heatmap", layout="wide")
+st.title("Victorian Suburbs Job Heatmap")
 
 # Function to load data from the direct Google Sheets CSV link
 @st.cache_data
@@ -26,85 +26,80 @@ def load_data(csv_url):
         st.error(f"Error loading data: {e}")
         return None
 
-# Improve address for geocoding with Australian context
-def prepare_australian_address(address):
-    if pd.isna(address) or address == '':
+# Improve suburb data for geocoding with Victorian context
+def prepare_victorian_suburb(suburb):
+    if pd.isna(suburb) or suburb == '':
         return None
         
-    # Ensure "Australia" is in the address
-    if "australia" not in address.lower():
-        address = f"{address}, Australia"
+    # If it's just a suburb name without VIC, add it
+    if "VIC" not in suburb and "Victoria" not in suburb:
+        suburb = f"{suburb}, VIC, Australia"
+    # If it has VIC but no Australia, add Australia
+    elif "VIC" in suburb and "Australia" not in suburb:
+        suburb = f"{suburb}, Australia"
+    # If it doesn't have either, add both
+    elif "VIC" not in suburb and "Victoria" not in suburb and "Australia" not in suburb:
+        suburb = f"{suburb}, VIC, Australia"
         
-    # Handle Victoria abbreviation
-    if " VIC " in address and not " Victoria " in address:
-        address = address.replace(" VIC ", " Victoria ")
-        
-    return address
+    return suburb
 
-# Function to geocode addresses with focus on Australia
+# Function to geocode Victorian suburbs
 @st.cache_data
-def geocode_australian_addresses(df, address_column):
-    if address_column not in df.columns:
-        st.error(f"Column '{address_column}' not found in the data. Available columns: {', '.join(df.columns)}")
+def geocode_victorian_suburbs(df, suburb_column):
+    if suburb_column not in df.columns:
+        st.error(f"Column '{suburb_column}' not found in the data. Available columns: {', '.join(df.columns)}")
         return None
     
     # Create new columns for latitude and longitude
-    df['latitude'] = None
-    df['longitude'] = None
-    df['geocoded_address'] = None
+    result_df = df.copy()
+    result_df['latitude'] = None
+    result_df['longitude'] = None
+    result_df['geocoded_address'] = None
     
-    # Set bounds for Australia to improve geocoding accuracy
-    australia_bounds = {
-        'min_lon': 113.338953078,
-        'max_lon': 153.569469029,
-        'min_lat': -43.6345972634,
-        'max_lat': -10.6681857235
+    # Set bounds for Victoria to improve geocoding accuracy
+    victoria_bounds = {
+        'min_lon': 140.9,
+        'max_lon': 150.0,
+        'min_lat': -39.2,
+        'max_lat': -33.9
     }
     
-    # List to store successfully geocoded rows
-    geocoded_rows = []
-    
-    with st.spinner('Geocoding Australian addresses... This may take a while.'):
+    with st.spinner('Geocoding Victorian suburbs... This may take a while.'):
         progress_bar = st.progress(0)
         total_rows = len(df)
         
         for i, row in df.iterrows():
-            # Get address and prepare it
-            address = prepare_australian_address(row[address_column])
-            if not address:
+            # Get suburb and prepare it
+            suburb = prepare_victorian_suburb(row[suburb_column])
+            if not suburb:
                 continue
                 
             try:
                 # First try with Nominatim (OSM) with Australia as region
-                g = geocoder.osm(address, country='Australia')
+                g = geocoder.osm(suburb, country='Australia')
                 
-                # If that fails, try with Google (if API key available)
-                if not g.ok and os.getenv('GOOGLE_API_KEY'):
-                    g = geocoder.google(address, key=os.getenv('GOOGLE_API_KEY'))
-                
-                # If that fails too, try ArcGIS
+                # If that fails, try with ArcGIS
                 if not g.ok:
-                    g = geocoder.arcgis(address)
+                    g = geocoder.arcgis(suburb)
+                    
+                # If that fails too, try with the OpenCage if API key is available
+                if not g.ok and os.getenv('OPENCAGE_API_KEY'):
+                    g = geocoder.opencage(suburb, key=os.getenv('OPENCAGE_API_KEY'))
                 
                 if g.ok:
-                    # Verify the coordinates are within Australia
-                    if (australia_bounds['min_lat'] <= g.lat <= australia_bounds['max_lat'] and 
-                        australia_bounds['min_lon'] <= g.lng <= australia_bounds['max_lon']):
+                    # Verify the coordinates are within Victoria
+                    if (victoria_bounds['min_lat'] <= g.lat <= victoria_bounds['max_lat'] and 
+                        victoria_bounds['min_lon'] <= g.lng <= victoria_bounds['max_lon']):
                         
-                        # Create a copy of the row
-                        geocoded_row = row.copy()
-                        geocoded_row['latitude'] = g.lat
-                        geocoded_row['longitude'] = g.lng
-                        geocoded_row['geocoded_address'] = g.address
-                        
-                        # Add to our list of geocoded rows
-                        geocoded_rows.append(geocoded_row)
+                        result_df.at[i, 'latitude'] = g.lat
+                        result_df.at[i, 'longitude'] = g.lng
+                        result_df.at[i, 'geocoded_address'] = g.address
                     else:
-                        st.warning(f"Geocoded coordinates for '{address}' are outside Australia")
+                        st.warning(f"Geocoded coordinates for '{suburb}' are outside Victoria")
                 else:
-                    st.warning(f"Could not geocode address: {address}")
+                    st.warning(f"Could not geocode suburb: {suburb}")
             except Exception as e:
-                st.warning(f"Error geocoding address '{address}': {e}")
+                st.warning(f"Error geocoding suburb '{suburb}': {e}")
             
             # Update progress
             progress_bar.progress((i + 1) / total_rows)
@@ -112,18 +107,18 @@ def geocode_australian_addresses(df, address_column):
             # Add a small delay to avoid rate limiting
             time.sleep(0.2)
     
-    # If we have geocoded rows, create a new dataframe
-    if geocoded_rows:
-        geocoded_df = pd.DataFrame(geocoded_rows)
-        return geocoded_df
-    else:
+    # Drop rows with missing coordinates
+    geocoded_df = result_df.dropna(subset=['latitude', 'longitude'])
+    
+    if len(geocoded_df) == 0:
         st.error("No valid coordinates found after geocoding")
         return None
+        
+    return geocoded_df
 
 # Function to create heatmap
-def create_heatmap(df, address_column):
-    # Create a map centered around the mean coordinates
-    # Default to Victoria, Australia if no coordinates
+def create_heatmap(df, suburb_column):
+    # Create a map centered around Melbourne, Victoria
     center_lat = df['latitude'].mean() if not df['latitude'].empty else -37.8136
     center_lng = df['longitude'].mean() if not df['longitude'].empty else 144.9631
     
@@ -135,17 +130,16 @@ def create_heatmap(df, address_column):
     
     # Add markers for each location with job details
     for _, row in df.iterrows():
-        # Create popup content with relevant job information
+        # Create popup content with suburb information
         popup_html = f"""
-        <div style="width: 300px">
-            <h4>{row.get('Title', 'Job Location')}</h4>
-            <p><b>Original Address:</b> {row.get(address_column, '')}</p>
+        <div style="width: 200px">
+            <h4>{row.get(suburb_column, 'Unknown Suburb')}</h4>
             <p><b>Geocoded Address:</b> {row.get('geocoded_address', '')}</p>
         """
         
         # Add other relevant columns to popup
         for col in df.columns:
-            if col not in ['latitude', 'longitude', 'Title', address_column, 'geocoded_address'] and not pd.isna(row[col]) and row[col] != '':
+            if col not in ['latitude', 'longitude', suburb_column, 'geocoded_address'] and not pd.isna(row[col]) and row[col] != '':
                 popup_html += f"<p><b>{col}:</b> {row[col]}</p>"
                 
         popup_html += "</div>"
@@ -153,84 +147,68 @@ def create_heatmap(df, address_column):
         folium.Marker(
             location=[row['latitude'], row['longitude']],
             popup=folium.Popup(popup_html, max_width=300),
-            icon=folium.Icon(icon="briefcase", prefix="fa")
+            icon=folium.Icon(icon="home", prefix="fa")
         ).add_to(m)
     
     return m
 
-# Function to extract or create an address column from the data
-def process_address_column(df):
-    # First check if we already have an Address column
-    if "Address" in df.columns:
-        return "Address", df
+# Helper function to handle pasted suburb data
+def parse_suburb_data(suburb_text):
+    # Split by newlines and remove any header rows
+    suburbs = [line.strip() for line in suburb_text.split('\n') if line.strip()]
     
-    # Try to find columns with "address" in the name (case insensitive)
-    address_cols = [col for col in df.columns if "address" in col.lower()]
-    if address_cols:
-        return address_cols[0], df
-        
-    # Look for columns with "location" in the name
-    location_cols = [col for col in df.columns if "location" in col.lower()]
-    if location_cols:
-        return location_cols[0], df
+    # Remove any header row if it exists (e.g., "Suburb")
+    if suburbs and suburbs[0].lower() == "suburb":
+        suburbs = suburbs[1:]
     
-    # If DataFrame has only one column, assume it contains addresses
-    if len(df.columns) == 1:
-        df = df.rename(columns={df.columns[0]: "Address"})
-        return "Address", df
-    
-    # No address column found - check data to see if it looks like addresses
-    # For demonstration, check the first column
-    first_col = df.columns[0]
-    first_values = df[first_col].dropna().astype(str)
-    
-    # Simple check: if values contain "VIC" or "Australia", likely addresses
-    if first_values.str.contains("VIC").any() or first_values.str.contains("Australia").any():
-        df = df.rename(columns={first_col: "Address"})
-        return "Address", df
-    
-    # No address column found and couldn't determine one
-    return None, df
+    return pd.DataFrame({"Suburb": suburbs})
 
 # Main app logic
 def main():
     # Default Google Sheets CSV URL
     default_csv_url = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/gviz/tq?tqx=out:csv"
-    csv_url = default_csv_url
     
-    # Add option to paste example addresses for testing
-    test_mode = st.sidebar.checkbox("Use example addresses instead")
+    # Add tabs for different data input methods
+    tab1, tab2, tab3 = st.tabs(["Google Sheets", "Paste Suburbs", "Upload File"])
     
-    if test_mode:
-        example_addresses = st.sidebar.text_area(
-            "Paste example addresses (one per line or as a Python list)",
-            value="""['Aquila Shoes, 7 Saligna Dr, Tullamarine VIC 3043, Australia', 
-'Aquila, Essendon Fields VIC 3041, Australia', 
-'Aquila Shoes, Bulla Rd, Essendon VIC 3040, Australia']"""
+    df = None
+    suburb_column = "Suburb"  # Default column name
+    
+    with tab1:
+        st.subheader("Load from Google Sheets")
+        use_default = st.checkbox("Use default Google Sheets URL", value=True)
+        
+        if use_default:
+            csv_url = default_csv_url
+        else:
+            csv_url = st.text_input("Enter Google Sheets CSV URL", value=default_csv_url)
+            
+        if st.button("Load from Google Sheets", key="load_sheets"):
+            with st.spinner("Loading data from Google Sheets..."):
+                df = load_data(csv_url)
+                
+    with tab2:
+        st.subheader("Paste Suburb Data")
+        pasted_suburbs = st.text_area(
+            "Paste suburb data (one suburb per line)",
+            height=300,
+            placeholder="Carlton\nDandenong\nMelbourne VIC\nRichmond\n..."
         )
         
-        if example_addresses:
-            try:
-                # Try to parse as Python list
-                if example_addresses.strip().startswith('[') and example_addresses.strip().endswith(']'):
-                    import ast
-                    addresses_list = ast.literal_eval(example_addresses)
-                else:
-                    # Otherwise split by newline
-                    addresses_list = [addr.strip() for addr in example_addresses.split('\n') if addr.strip()]
+        if st.button("Use Pasted Data", key="use_pasted"):
+            if pasted_suburbs:
+                df = parse_suburb_data(pasted_suburbs)
+                st.success(f"Created dataset with {len(df)} suburbs")
+            else:
+                st.error("Please paste suburb data first")
                 
-                # Create DataFrame from list
-                df = pd.DataFrame({"Address": addresses_list})
-                st.success(f"Created test dataset with {len(df)} addresses")
-            except Exception as e:
-                st.error(f"Error parsing addresses: {e}")
-                df = None
-        else:
-            df = None
-    else:
-        # Load data automatically from Google Sheets
-        with st.spinner("Loading data from Google Sheets..."):
-            df = load_data(csv_url)
+    with tab3:
+        st.subheader("Upload CSV File")
+        uploaded_file = st.file_uploader("Upload a CSV file containing suburb data", type=["csv"])
+        
+        if uploaded_file is not None:
+            df = pd.read_csv(uploaded_file)
+            st.success(f"Uploaded file with {len(df)} rows")
     
     if df is not None:
         st.success(f"Data loaded successfully with {len(df)} rows")
@@ -239,62 +217,74 @@ def main():
         with st.expander("Show raw data"):
             st.dataframe(df)
         
-        # Process to find or create address column
-        address_column, df = process_address_column(df)
-        
-        if not address_column:
-            st.warning("Could not automatically detect the address column.")
-            address_column = st.selectbox(
-                "Please select the column containing address information:", 
-                options=df.columns.tolist()
-            )
+        # Identify the suburb column if it's not already named "Suburb"
+        if "Suburb" not in df.columns:
+            # Look for likely suburb column names
+            potential_columns = [col for col in df.columns if any(
+                keyword in col.lower() for keyword in ["suburb", "location", "address", "place"])]
+            
+            if potential_columns:
+                suburb_column = st.selectbox(
+                    "Select the column containing suburb names:",
+                    options=potential_columns,
+                    index=0
+                )
+            else:
+                suburb_column = st.selectbox(
+                    "Select the column containing suburb names:",
+                    options=df.columns.tolist(),
+                    index=0
+                )
         else:
-            st.info(f"Using '{address_column}' as the address column")
+            suburb_column = "Suburb"
+            st.info(f"Using '{suburb_column}' as the suburb column")
         
-        # Automatically geocode the addresses
-        with st.spinner("Geocoding addresses (this may take several minutes)..."):
-            geocoded_df = geocode_australian_addresses(df, address_column)
+        # Show a sample of the suburbs to be geocoded
+        st.subheader("Sample Suburbs")
+        st.write(df[suburb_column].head(5).tolist())
         
-        if geocoded_df is not None and not geocoded_df.empty:
-            # Show stats
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Locations", len(df))
-            col2.metric("Geocoded Locations", len(geocoded_df))
-            col3.metric("Success Rate", f"{len(geocoded_df)/len(df)*100:.1f}%")
+        # Create a button to start geocoding
+        if st.button("Generate Heatmap"):
+            # Geocode the suburbs
+            geocoded_df = geocode_victorian_suburbs(df, suburb_column)
             
-            # Create and display the map
-            st.subheader("Job Locations Heatmap (Australia)")
-            map_obj = create_heatmap(geocoded_df, address_column)
-            folium_static(map_obj, width=1200, height=600)
-            
-            # Show the geocoded data
-            with st.expander("Show geocoded data"):
-                st.dataframe(geocoded_df)
+            if geocoded_df is not None and len(geocoded_df) > 0:
+                # Show stats
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Suburbs", len(df))
+                col2.metric("Geocoded Suburbs", len(geocoded_df))
+                col3.metric("Success Rate", f"{len(geocoded_df)/len(df)*100:.1f}%")
                 
-            # Add download button for geocoded data
-            csv = geocoded_df.to_csv(index=False)
-            st.download_button(
-                label="Download geocoded data as CSV",
-                data=csv,
-                file_name="geocoded_australian_job_locations.csv",
-                mime="text/csv",
-            )
-        else:
-            st.error("Failed to geocode any addresses. Please check the address format.")
-            
-            # Show troubleshooting tips
-            st.subheader("Troubleshooting")
-            st.markdown("""
-            - Make sure addresses include state (VIC, NSW, etc.) and "Australia"
-            - Try adding more details to ambiguous addresses
-            - Consider adding postal codes to improve geocoding
-            - You may need to add a Google Maps API key for better results
-            """)
-            
-            # Show example of a well-formatted address
-            st.code("Example good address format: '7 Saligna Dr, Tullamarine VIC 3043, Australia'")
+                # Create and display the map
+                st.subheader("Victorian Suburbs Heatmap")
+                map_obj = create_heatmap(geocoded_df, suburb_column)
+                folium_static(map_obj, width=1200, height=600)
+                
+                # Show the geocoded data
+                with st.expander("Show geocoded data"):
+                    st.dataframe(geocoded_df)
+                    
+                # Add download button for geocoded data
+                csv = geocoded_df.to_csv(index=False)
+                st.download_button(
+                    label="Download geocoded data as CSV",
+                    data=csv,
+                    file_name="geocoded_victorian_suburbs.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.error("Failed to geocode any suburbs. Please check the data format.")
+                
+                # Add debugging info
+                st.subheader("Troubleshooting")
+                st.markdown("""
+                ### Try using more specific suburb formats:
+                - Add "VIC, Australia" to suburb names (e.g., "Carlton, VIC, Australia")
+                - For Melbourne suburbs, add the area (e.g., "South Melbourne, VIC, Australia")
+                - Consider adding postal codes if available
+                """)
     else:
-        st.error("Failed to load data. Please check the URL or try the example addresses option.")
+        st.info("Please load data using one of the tabs above")
 
 if __name__ == "__main__":
     main()
