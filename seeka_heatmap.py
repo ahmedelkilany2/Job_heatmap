@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import folium_static
-from geopy.geocoders import Photon  # More stable geocoding service
+from geopy.geocoders import Photon  
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import time
 
@@ -18,28 +18,33 @@ def load_data():
     try:
         df = pd.read_csv(GOOGLE_SHEET_URL)
         df.columns = df.columns.str.strip().str.lower()  # Normalize column names
-        if "location" not in df.columns:
-            st.error("⚠️ 'location' column missing in the dataset!")
+        
+        # Debugging: Show available columns
+        st.write("🔍 Available columns:", df.columns.tolist())
+
+        if "suburb" not in df.columns:
+            st.error("⚠️ 'Suburb' column missing! Check column names above.")
             return None
+        
         return df
     except Exception as e:
         st.error(f"⚠️ Failed to load data: {str(e)}")
         return None
 
 @st.cache_data(ttl=14400)  # Cache geocoded results
-def geocode_location(location):
-    """Convert location names to latitude & longitude using Photon."""
+def geocode_location(suburb):
+    """Convert suburb names to latitude & longitude using Photon."""
     try:
-        full_location = f"{location}, Victoria, Australia"  # Ensure correct region
+        full_location = f"{suburb}, Victoria, Australia"  # Ensure correct region
         location_data = geolocator.geocode(full_location, timeout=10)
         if location_data:
             return location_data.latitude, location_data.longitude
     except (GeocoderTimedOut, GeocoderServiceError):
-        st.warning(f"⚠️ Geocoding timed out for {location}. Retrying in 2 seconds...")
+        st.warning(f"⚠️ Geocoding timed out for {suburb}. Retrying in 2 seconds...")
         time.sleep(2)
-        return geocode_location(location)
+        return geocode_location(suburb)
     except Exception as e:
-        st.warning(f"⚠️ Geocoding failed for {location}: {str(e)}")
+        st.warning(f"⚠️ Geocoding failed for {suburb}: {str(e)}")
     return None, None
 
 def main():
@@ -51,9 +56,9 @@ def main():
 
     if df is not None:
         st.success("✅ Data Loaded Successfully!")
-        
+
         # Apply geocoding with caching
-        df["lat"], df["lon"] = zip(*df["location"].apply(geocode_location))
+        df["lat"], df["lon"] = zip(*df["suburb"].apply(geocode_location))
         df = df.dropna(subset=["lat", "lon"])  # Remove rows with missing coordinates
 
         # Create Map
