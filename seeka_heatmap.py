@@ -57,7 +57,7 @@ def main():
         df = df.dropna(subset=["lat", "lon"])  # Remove rows with missing coordinates
 
         # Create Map
-        st.subheader("📍 Job Posting Density Heatmap")
+        st.subheader("📍 Job Posting Density Heatmap For Seek")
         m = folium.Map(location=[-37.8136, 144.9631], zoom_start=6)  # Default: Melbourne, VIC
 
         # Add Heatmap
