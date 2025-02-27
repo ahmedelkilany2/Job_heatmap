@@ -10,7 +10,7 @@ import time
 geolocator = Photon(user_agent="vic_job_analysis")
 
 # Google Sheets URL (Make sure it's a public CSV link)
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/export?format=csv"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/gviz/tq?tqx=out:csv"
 
 @st.cache_data(ttl=14400)  # Cache data for 4 hours
 def load_data():
