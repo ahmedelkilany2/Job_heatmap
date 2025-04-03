@@ -5,7 +5,7 @@ import os
 # Set environment variable to prevent app from sleeping
 os.environ['STREAMLIT_SERVER_HEADLESS'] = 'true'
 
-# ✅ Ensure this is the FIRST Streamlit command
+# this is the FIRST Streamlit command
 st.set_page_config(
     page_title="Job Analysis Dashboards", 
     layout="wide",
