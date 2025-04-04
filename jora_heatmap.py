@@ -54,7 +54,7 @@ def geocode_location(location):
 
 def main():
     """Main function to run the job heatmap dashboard."""
-    st.subheader("📍 Job Posting Location Analysis (Victoria)")
+    st.subheader("📍Jora Job Posting Location Analysis (Victoria)")
     
     # Add auto-refresh button and interval selection
     col1, col2 = st.columns([3, 1])
