@@ -5,6 +5,8 @@ import plotly.express as px
 import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
+import time
+from datetime import datetime
 
 # Helper functions that don't use Streamlit widgets
 def make_donut(input_response, input_text, input_color):
@@ -49,9 +51,9 @@ def make_donut(input_response, input_text, input_color):
     ).properties(width=130, height=130)
     return plot_bg + plot + text
 
-@st.cache_data
+@st.cache_data(ttl=300)  # Cache data for 5 minutes (300 seconds)
 def load_data():
-    """Loads data from Google Sheets CSV URL."""
+    """Loads data from Google Sheets CSV URL with auto-refresh capability."""
     # Convert edit URL to export URL
     sheet_id = "154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k"
     gid = "553613618"
@@ -249,20 +251,77 @@ def create_salary_range_by_category_chart(df):
     
     return chart
 
-# Main function that will be called by the main app
+# Main function that will be run by Steamlit
 def main():
-    """Main function to run the Adzuna dashboard."""
+    """Main function to run the Adzuna dashboard with auto-update features."""
+    # Set page config
+    st.set_page_config(
+        page_title="Adzuna Job Dashboard - Auto-updating",
+        page_icon="📊",
+        layout="wide"
+    )
+    
     # Title and description
     st.title("Adzuna Job Scraping Analysis - Australia 📊")
-    st.markdown("This is an interactive dashboard to analyze job postings data scraped from Adzuna website.")
+    st.markdown("This is an auto-updating interactive dashboard to analyze job postings data scraped from Adzuna website.")
     
+    # Auto-refresh status and controls
+    refresh_container = st.container()
+    with refresh_container:
+        col1, col2, col3 = st.columns([3, 2, 3])
+        with col1:
+            auto_refresh = st.checkbox("Enable auto-refresh", value=True)
+        with col2:
+            if auto_refresh:
+                refresh_interval = st.slider("Refresh interval (minutes)", 1, 60, 5)
+            else:
+                refresh_interval = 5  # Default value when auto-refresh is off
+        with col3:
+            last_refresh = st.empty()  # Placeholder for last refresh time
+            manual_refresh = st.button("Refresh Now")
+    
+    # Initialize session state for refresh tracking
+    if 'last_refresh_time' not in st.session_state:
+        st.session_state['last_refresh_time'] = datetime.now()
+    
+    # Load data with caching using ttl parameter
+    # Manual refresh will clear cache and fetch new data
+    if manual_refresh:
+        st.cache_data.clear()
+        st.session_state['last_refresh_time'] = datetime.now()
+        
     # Load data
     df_full = load_data()
     
+    # Update the last refresh time display
+    last_refresh.text(f"Last updated: {st.session_state['last_refresh_time'].strftime('%H:%M:%S')}")
+    
+    # Set up auto-refresh if enabled
+    if auto_refresh:
+        # This creates a script that will refresh the page at the specified interval
+        refresh_sec = refresh_interval * 60
+        st.markdown(
+            f"""
+            <script>
+                setTimeout(function(){{
+                    window.location.reload();
+                }}, {refresh_sec * 1000});
+            </script>
+            """,
+            unsafe_allow_html=True
+        )
+    
     if df_full is not None:
-        # Show available columns in sidebar for debugging
-        st.sidebar.write("Available columns:", df_full.columns.tolist())
-        st.sidebar.write(f"Data shape: {df_full.shape}")
+        # Data Stats in sidebar
+        with st.sidebar:
+            st.header("Data Statistics")
+            st.metric("Total Jobs Loaded", len(df_full))
+            st.metric("Last Updated", st.session_state['last_refresh_time'].strftime('%Y-%m-%d %H:%M:%S'))
+            
+            # Show available columns in sidebar for debugging (optional)
+            if st.checkbox("Show Technical Details", False):
+                st.write("Available columns:", df_full.columns.tolist())
+                st.write(f"Data shape: {df_full.shape}")
         
         # Creating dropdown filtering sidebar
         st.sidebar.header("Filters")
@@ -275,9 +334,9 @@ def main():
             st.error(f"Error: Column '{e}' not found in DataFrame. Check your Google Sheet column names.")
             return
 
-        category_options = ['All'] + category_options
-        contract_type_options = ['All'] + contract_type_options
-        contract_time_options = ['All'] + contract_time_options
+        category_options = ['All'] + sorted(category_options)
+        contract_type_options = ['All'] + sorted(contract_type_options)
+        contract_time_options = ['All'] + sorted(contract_time_options)
 
         category_filter = st.sidebar.multiselect(
             "Category", options=category_options, default=['All']
@@ -307,7 +366,7 @@ def main():
                     delta=f"{percentage_filtered:.2f}%",
                 )
                 
-                st.subheader("Total Job Postings by day")
+                st.subheader("Total Job Postings by Day")
                 day_chart = create_total_jobs_by_day_chart(filtered_df)
                 if day_chart is not None:
                     st.plotly_chart(day_chart, use_container_width=True)
@@ -356,7 +415,7 @@ def main():
                     st.warning("Cannot plot salary range: Data issue.")
 
             with col3:
-                st.subheader("Total Job Postings Job Categories")
+                st.subheader("Total Job Postings by Categories")
                 category_chart = create_job_postings_by_categories_chart(filtered_df)
                 if category_chart is not None:
                     st.plotly_chart(category_chart, use_container_width=True)
@@ -367,7 +426,33 @@ def main():
             if st.checkbox("Show Raw Data"):
                 st.subheader("Raw Data")
                 st.dataframe(filtered_df)
+                
+                # Export options
+                export_col1, export_col2 = st.columns(2)
+                with export_col1:
+                    if st.button("Export to CSV"):
+                        csv = filtered_df.to_csv(index=False)
+                        st.download_button(
+                            label="Download CSV",
+                            data=csv,
+                            file_name=f"adzuna_jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv"
+                        )
+                with export_col2:
+                    if st.button("Export to Excel"):
+                        # To make this work, you'll need to add openpyxl to requirements.txt
+                        buffer = pd.ExcelWriter(f"adzuna_jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+                        filtered_df.to_excel(buffer, index=False)
+                        st.download_button(
+                            label="Download Excel",
+                            data=buffer,
+                            file_name=f"adzuna_jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                        )
         else:
             st.warning("No data matches your selection. Change the filters!")
     else:
-        st.error("Data loading failed. Please check the credentials file path and Google Sheet.")
+        st.error("Data loading failed. Please check the Google Sheet URL and ensure it's publicly accessible.")
+
+# Entry point for the Streamlit app
+if __name__ == "__main__":
+    main()
