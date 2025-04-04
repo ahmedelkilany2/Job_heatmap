@@ -21,7 +21,7 @@ st.title("Job Market Analysis Dashboards")
 # Create a radio button to select the dashboard
 dashboard_selection = st.radio(
     "Select Dashboard:",
-    ("Adzuna Job Analysis", "Jora Job Analysis", "Seeka Job Analysis")
+    ("Adzuna Job Analysis", "Jora Job Analysis", "Seeka Job Analysis", "Indeed Job Analysis")
 )
 # Dictionary mapping selection to module names
 modules = {
