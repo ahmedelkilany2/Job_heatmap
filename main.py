@@ -22,7 +22,7 @@ dashboard_selection = st.radio(
 # Dictionary mapping selection to module names
 modules = {
     "Adzuna Job Analysis": "dropdown_function",
-    "Jora Job Analysis": "job_heatmap",
+    "Jora Job Analysis": "jora_heatmap",
     "Seek Job Analysis": "seek_heatmap",
     "Indeed Job Analysis": "indeed_heatmap"
 }
