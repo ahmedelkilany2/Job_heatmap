@@ -28,6 +28,8 @@ modules = {
     "Adzuna Job Analysis": "dropdown_function",
     "Jora Job Analysis": "job_heatmap",
     "Seeka Job Analysis": "seeka_heatmap"
+    "Indeed Job Analysis": "indeed_heatmap"
+    
 }
 module_name = modules[dashboard_selection]
 # Import the selected module - do NOT cache this!
