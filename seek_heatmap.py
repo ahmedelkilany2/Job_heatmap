@@ -10,7 +10,7 @@ import hashlib
 # Set up Photon geocoder (alternative to Nominatim)
 geolocator = Photon(user_agent="vic_job_analysis")
 
-# Google Sheets URL (Make sure it's a public CSV link)
+# Updated Google Sheets URL
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/154MnI4PV3-_OIDo2MZWw413gbzw9dVoS-aixCRujR5k/gviz/tq?tqx=out:csv"
 
 @st.cache_data(ttl=600)  # Cache data for 10 minutes instead of 4 hours
@@ -54,7 +54,7 @@ def geocode_location(location):
 
 def main():
     """Main function to run the job heatmap dashboard."""
-    st.subheader("📍Seek Job Posting Location Analysis (Victoria)")
+    st.subheader("📍Jora Job Posting Location Analysis (Victoria)")
     
     # Add auto-refresh button and interval selection
     col1, col2 = st.columns([3, 1])
